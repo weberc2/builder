@@ -108,23 +108,6 @@ type Cache interface {
 
 var ErrPluginNotFound = errors.New("Plugin not found")
 
-type FrozenTargetStore interface {
-	FrozenTarget(CacheRef) (FrozenTarget, error)
-}
-
-type MemoryFrozenTargetStore []FrozenTarget
-
-var ErrFrozenTargetNotFound = errors.New("Frozen target not found")
-
-func (mfts MemoryFrozenTargetStore) FrozenTarget(id CacheRef) (FrozenTarget, error) {
-	for _, frozenTarget := range mfts {
-		if frozenTarget.ID == id {
-			return frozenTarget, nil
-		}
-	}
-	return FrozenTarget{}, ErrFrozenTargetNotFound
-}
-
 type DAG struct {
 	FrozenTarget
 	Dependencies []DAG
