@@ -7,5 +7,8 @@ go_binary(
         file("freeze.go"),
         file("evaluate.go"),
         file("types.go"),
+        file("execute.go"),
+        file("cache.go"),
+        file("checksum.go"),
     ],
 )
