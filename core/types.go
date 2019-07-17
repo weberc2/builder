@@ -1,7 +1,8 @@
-package main
+package core
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/adler32"
 	"path/filepath"
@@ -15,13 +16,14 @@ type TargetID struct {
 	Target  TargetName
 }
 
-func parseTargetID(s string) (TargetID, error) {
+func ParseTargetID(s string) (TargetID, error) {
 	i := strings.Index(string(s), ":")
 	if i < 1 { // must have a colon; can't be first character
 		return TargetID{}, fmt.Errorf("ValueError: Invalid target ref")
 	}
 
 	return TargetID{
+		// trim trailing slashes from the package name
 		Package: PackageName(s[:i]),
 		Target:  TargetName(s[i+1:]),
 	}, nil
@@ -136,7 +138,28 @@ type FrozenField struct {
 
 type FrozenObject []FrozenField
 
+var ErrKeyNotFound = errors.New("Key not found")
+
+func (fo FrozenObject) Get(key string) (FrozenInput, error) {
+	for _, field := range fo {
+		if field.Key == key {
+			return field.Value, nil
+		}
+	}
+	return nil, ErrKeyNotFound
+}
+
 type FrozenArray []FrozenInput
+
+func (fa FrozenArray) ForEach(f func(i int, elt FrozenInput) error) error {
+	for i, elt := range fa {
+		if err := f(i, elt); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
 
 type ArtifactID struct {
 	FrozenTargetID
@@ -144,11 +167,11 @@ type ArtifactID struct {
 }
 
 func (aid ArtifactID) String() string {
-	return filepath.Join(
-		string(aid.Package),
-		string(aid.Target),
-		string(aid.FilePath),
-		fmt.Sprint(aid.Checksum),
+	return fmt.Sprintf(
+		"%s:%s@%d",
+		aid.Package,
+		filepath.Join(string(aid.Target), aid.FilePath),
+		aid.Checksum,
 	)
 }
 
@@ -203,4 +226,18 @@ type FrozenTarget struct {
 	Inputs      FrozenObject
 	BuilderType BuilderType
 	BuilderArgs FrozenObject
+}
+
+type BuilderType string
+
+type BuildScript func(inputs FrozenObject, out ArtifactID, cache Cache, dependencies []DAG) error
+
+type Plugin struct {
+	Type    BuilderType
+	Factory func(args FrozenObject) (BuildScript, error)
+}
+
+type DAG struct {
+	FrozenTarget
+	Dependencies []DAG
 }

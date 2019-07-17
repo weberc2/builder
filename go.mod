@@ -2,4 +2,14 @@ module github.com/weberc2/builder
 
 go 1.12
 
-require go.starlark.net v0.0.0-20190528202925-30ae18b8564f
+require (
+	github.com/bmatcuk/doublestar v1.1.1
+	github.com/dsnet/compress v0.0.1 // indirect
+	github.com/golang/snappy v0.0.1 // indirect
+	github.com/mholt/archiver v3.1.1+incompatible
+	github.com/nwaples/rardecode v1.0.0 // indirect
+	github.com/pierrec/lz4 v2.0.5+incompatible // indirect
+	github.com/pkg/errors v0.8.1
+	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
+	go.starlark.net v0.0.0-20190528202925-30ae18b8564f
+)

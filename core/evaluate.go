@@ -1,10 +1,12 @@
-package main
+package core
 
 import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
+
+	"github.com/bmatcuk/doublestar"
 
 	"go.starlark.net/starlark"
 )
@@ -14,6 +16,58 @@ type Evaluator struct{ Root string }
 func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 	var targets targets
 	builtins := starlark.StringDict{
+		"glob": starlark.NewBuiltin(
+			"glob",
+			func(
+				_ *starlark.Thread,
+				_ *starlark.Builtin,
+				args starlark.Tuple,
+				kwargs []starlark.Tuple,
+			) (starlark.Value, error) {
+				if len(kwargs) > 0 {
+					return nil, fmt.Errorf("Unexpected keyword argument")
+				}
+				if len(args) != 1 {
+					return nil, fmt.Errorf(
+						"Expected 1 unnamed argument; found %d",
+						len(args),
+					)
+				}
+
+				if s, ok := args[0].(starlark.String); ok {
+					// `dir` is the absolute path to the package. We prefix the
+					// glob with this `dir` so we only grab the files in that
+					// directory (instead of the process's current working
+					// directory). The matches we get back are absolute paths,
+					// so we must convert them back into relative paths.
+					dir := filepath.Join(ev.Root, string(p))
+					matches, err := doublestar.Glob(filepath.Join(dir, string(s)))
+					if err != nil {
+						return nil, err
+					}
+
+					// convert absolute paths back to package-relative paths.
+					for i, match := range matches {
+						tmp, err := filepath.Rel(dir, match)
+						if err != nil {
+							return nil, err
+						}
+						matches[i] = tmp
+					}
+
+					values := make([]starlark.Value, len(matches))
+					for i, match := range matches {
+						values[i] = SourcePath{FilePath: match}
+					}
+					return starlark.NewList(values), nil
+				}
+
+				return nil, fmt.Errorf(
+					"TypeError: Expected str, got %T",
+					args[0],
+				)
+			},
+		),
 		"file": starlark.NewBuiltin(
 			"file",
 			func(
@@ -62,7 +116,7 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 				}
 
 				if s, ok := args[0].(starlark.String); ok {
-					return parseTargetID(string(s))
+					return ParseTargetID(string(s))
 				}
 
 				return nil, fmt.Errorf(
@@ -188,7 +242,7 @@ func (ts *targets) newTarget(
 	}
 
 	ts.targets = append(ts.targets, t)
-	return starlark.None, nil
+	return t.ID, nil
 }
 
 func starlarkValueToInput(tid TargetID, value starlark.Value) (Input, error) {

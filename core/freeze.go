@@ -1,12 +1,27 @@
-package main
+package core
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"path/filepath"
+
+	"github.com/pkg/errors"
 )
+
+func FreezeTargetID(
+	root string,
+	cache Cache,
+	evaluator Evaluator,
+	targetID TargetID,
+) (DAG, error) {
+	f := freezer{
+		root:      root,
+		cache:     cache,
+		evaluator: evaluator,
+	}
+	return f.freezeTargetID(targetID)
+}
 
 type freezer struct {
 	root      string
@@ -30,6 +45,7 @@ func (f *freezer) freezeArray(a Array) ([]DAG, FrozenArray, error) {
 
 func (f *freezer) freezeSourcePath(sp SourcePath) (ArtifactID, error) {
 	data, err := ioutil.ReadFile(filepath.Join(
+		f.root,
 		string(sp.Package),
 		sp.FilePath,
 	))
@@ -69,13 +85,13 @@ func (f *freezer) freezeTargetID(tid TargetID) (DAG, error) {
 		if target.ID == tid {
 			dag, err := f.freezeTarget(target)
 			if err != nil {
-				return DAG{}, err
+				return DAG{}, errors.Wrapf(err, "Freezing target %s", tid)
 			}
 			return dag, nil
 		}
 	}
 
-	return DAG{}, ErrTargetNotFound
+	return DAG{}, errors.Wrapf(ErrTargetNotFound, "Target %s", tid)
 }
 
 func (f *freezer) freezeInput(i Input) ([]DAG, FrozenInput, error) {
@@ -88,7 +104,14 @@ func (f *freezer) freezeInput(i Input) ([]DAG, FrozenInput, error) {
 		return []DAG{dag}, dag.ID.ArtifactID(), nil
 	case SourcePath:
 		artifactID, err := f.freezeSourcePath(x)
-		return nil, artifactID, err
+		if err != nil {
+			return nil, ArtifactID{}, errors.Wrapf(
+				err,
+				"Reading source path %s",
+				x,
+			)
+		}
+		return nil, artifactID, nil
 	case Int:
 		return nil, x, nil
 	case String:
