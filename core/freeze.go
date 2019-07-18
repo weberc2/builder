@@ -44,7 +44,7 @@ func (f *freezer) freezeArray(a Array) ([]DAG, FrozenArray, error) {
 	return deps, out, nil
 }
 
-func (f *freezer) freezeSourcePath(sp SourcePath) (ArtifactID, error) {
+func (f *freezer) freezeFileGroup(fg FileGroup) (ArtifactID, error) {
 	tmpDir, err := ioutil.TempDir("", "")
 	if err != nil {
 		return ArtifactID{}, errors.Wrap(err, "Creating temporary directory")
@@ -59,12 +59,12 @@ func (f *freezer) freezeSourcePath(sp SourcePath) (ArtifactID, error) {
 		}
 	}()
 
-	checksums := make([]uint32, len(sp.Paths)+1)
-	checksums[0] = ChecksumString(string(sp.Package))
-	for i, path := range sp.Paths {
+	checksums := make([]uint32, len(fg.Paths)+1)
+	checksums[0] = ChecksumString(string(fg.Package))
+	for i, path := range fg.Paths {
 		data, err := ioutil.ReadFile(filepath.Join(
 			f.root,
-			string(sp.Package),
+			string(fg.Package),
 			path,
 		))
 		if err != nil {
@@ -101,13 +101,13 @@ func (f *freezer) freezeSourcePath(sp SourcePath) (ArtifactID, error) {
 				err,
 				"Writing temp file for file %s in file group for package %s",
 				path,
-				sp.Package,
+				fg.Package,
 			)
 		}
 	}
 
 	aid := ArtifactID{
-		Package:  sp.Package,
+		Package:  fg.Package,
 		Checksum: JoinChecksums(checksums...),
 	}
 
@@ -154,8 +154,8 @@ func (f *freezer) freezeInput(i Input) ([]DAG, FrozenInput, error) {
 			return nil, nil, err
 		}
 		return []DAG{dag}, dag.ID.ArtifactID(), nil
-	case SourcePath:
-		artifactID, err := f.freezeSourcePath(x)
+	case FileGroup:
+		artifactID, err := f.freezeFileGroup(x)
 		if err != nil {
 			return nil, ArtifactID{}, errors.Wrapf(
 				err,

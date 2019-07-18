@@ -106,25 +106,25 @@ func (tid TargetID) Hash() (uint32, error) {
 
 func (tid TargetID) Type() string { return "Target" }
 
-type SourcePath struct {
+type FileGroup struct {
 	Package PackageName
 	Paths   []string
 }
 
-func (sp SourcePath) Freeze() {}
+func (fg FileGroup) Freeze() {}
 
-func (sp SourcePath) String() string {
-	return fmt.Sprintf("%s:[%s]", sp.Package, strings.Join(sp.Paths, ", "))
+func (fg FileGroup) String() string {
+	return fmt.Sprintf("%s:[%s]", fg.Package, strings.Join(fg.Paths, ", "))
 }
 
-func (sp SourcePath) Type() string { return "SourcePath" }
+func (fg FileGroup) Type() string { return "FileGroup" }
 
-func (sp SourcePath) Truth() starlark.Bool { return starlark.Bool(true) }
+func (fg FileGroup) Truth() starlark.Bool { return starlark.Bool(true) }
 
-func (sp SourcePath) Hash() (uint32, error) {
-	checksums := make([]uint32, len(sp.Paths)+1)
-	checksums[0] = ChecksumString(string(sp.Package))
-	for i, path := range sp.Paths {
+func (fg FileGroup) Hash() (uint32, error) {
+	checksums := make([]uint32, len(fg.Paths)+1)
+	checksums[0] = ChecksumString(string(fg.Package))
+	for i, path := range fg.Paths {
 		checksums[i+1] = ChecksumString(path)
 	}
 	return JoinChecksums(checksums...), nil
@@ -151,13 +151,13 @@ type Array []Input
 
 type Input interface{ input() }
 
-func (tid TargetID) input()  {}
-func (sp SourcePath) input() {}
-func (i Int) input()         {}
-func (s String) input()      {}
-func (b Bool) input()        {}
-func (o Object) input()      {}
-func (a Array) input()       {}
+func (tid TargetID) input() {}
+func (fg FileGroup) input() {}
+func (i Int) input()        {}
+func (s String) input()     {}
+func (b Bool) input()       {}
+func (o Object) input()     {}
+func (a Array) input()      {}
 
 type Target struct {
 	ID          TargetID

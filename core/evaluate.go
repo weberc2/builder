@@ -63,7 +63,7 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 					)
 				}
 
-				return SourcePath{Paths: allMatches}, nil
+				return FileGroup{Paths: allMatches}, nil
 			},
 		),
 		"file": starlark.NewBuiltin(
@@ -97,7 +97,7 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 					)
 				}
 
-				return SourcePath{Paths: paths}, nil
+				return FileGroup{Paths: paths}, nil
 			},
 		),
 		"mktarget": starlark.NewBuiltin("mktarget", targets.newTarget),
@@ -255,7 +255,7 @@ func (ts *targets) newTarget(
 
 func starlarkValueToInput(tid TargetID, value starlark.Value) (Input, error) {
 	switch x := value.(type) {
-	case SourcePath:
+	case FileGroup:
 		x.Package = tid.Package
 		return x, nil
 	case TargetID:
