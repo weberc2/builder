@@ -1,12 +1,9 @@
 package python
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +18,7 @@ type sourceBinary struct {
 	packageName  string
 	entryPoint   string
 	dependencies []core.ArtifactID
-	sources      []core.ArtifactID
+	sources      core.ArtifactID
 }
 
 var ErrUnknownTarget = errors.New("Unknown target")
@@ -142,8 +139,7 @@ func sourceBinaryInstall(
 	defer os.Remove(tmpWheelDir)
 
 	if err := buildWheel(
-		cache,
-		bin.sources,
+		cache.Path(bin.sources),
 		tmpWheelDir,
 		stdout,
 		stderr,
@@ -202,58 +198,25 @@ DEPENDENCIES:
 }
 
 func buildWheel(
-	cache core.Cache,
-	sources []core.ArtifactID,
+	sourcesDir string,
 	outputDir string,
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	workspace, err := ioutil.TempDir("", "")
-	if err != nil {
-		return errors.Wrap(err, "Creating temp workspace directory")
-	}
-	defer os.Remove(workspace)
-
-	// Copy source files from the cache to the workspace directory
-	for _, source := range sources {
-		workspaceFilePath := filepath.Join(workspace, source.FilePath)
-		dir := filepath.Dir(workspaceFilePath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return errors.Wrapf(
-				err,
-				"Creating parent directory in workspace for source file %s",
-				source,
-			)
-		}
-
-		cache.Read(source, func(r io.Reader) error {
-			file, err := os.Create(workspaceFilePath)
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"Creating workspace copy of source file %s",
-					source,
-				)
-			}
-			defer func() {
-				if err := file.Close(); err != nil {
-					log.Printf("ERROR closing file %s", workspaceFilePath)
-				}
-			}()
-
-			_, err = io.Copy(file, r)
-			return err
-		})
-	}
-
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return errors.Wrap(err, "Creating the output dir in the cache")
+		return errors.Wrap(err, "Creating the output dir")
 	}
 
-	cmd := exec.Command("pip", "wheel", "--no-cache-dir", "-w", outputDir, ".")
+	cmd := exec.Command(
+		"pip",
+		"wheel",
+		"--no-cache-dir",
+		"-w",
+		outputDir,
+		sourcesDir,
+	)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Dir = workspace
 
 	if err := cmd.Run(); err != nil {
 		return errors.Wrapf(
@@ -269,7 +232,7 @@ func buildWheel(
 type sourceLibrary struct {
 	packageName  string
 	dependencies []core.ArtifactID
-	sources      []core.ArtifactID
+	sources      core.ArtifactID
 }
 
 func sourceLibraryInstall2(
@@ -279,7 +242,12 @@ func sourceLibraryInstall2(
 	stderr io.Writer,
 	lib sourceLibrary,
 ) error {
-	return buildWheel(cache, lib.sources, cache.Path(output), stdout, stderr)
+	return buildWheel(
+		cache.Path(lib.sources),
+		cache.Path(output),
+		stdout,
+		stderr,
+	)
 }
 
 type pypiLibrary struct {
@@ -306,95 +274,6 @@ func pypiLibraryInstall(
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		return errors.Wrap(err, "Installing pypi library")
-	}
-	return nil
-}
-
-// sourceLibraryInstall collects all of the source files on the library and
-// puts them into a .tar.gz in the cache at `output`.
-func sourceLibraryInstall(
-	output core.ArtifactID,
-	cache core.Cache,
-	lib sourceLibrary,
-) error {
-	outputFile, err := os.Create(cache.Path(output))
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"Creating output file in cache for %s",
-			output,
-		)
-	}
-	defer func() {
-		if err := outputFile.Close(); err != nil {
-			log.Printf("ERROR closing output file %s: %v", output, err)
-		}
-	}()
-
-	gz := gzip.NewWriter(outputFile)
-	w := tar.NewWriter(gz)
-	for _, source := range lib.sources {
-		// Since we're using defer to close the files, we don't want to keep
-		// every file open until the end of the outer function (lest we hit the
-		// limit on open file handles), so we run the loop body in a closure
-		// such that the defers will execute when the closure finishes (inside
-		// the loop body) instead of after the outer function has finished.
-		if err := func() error {
-			file, err := cache.Open(source)
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"Opening source file from cache %s",
-					source,
-				)
-			}
-			defer file.Close()
-
-			info, err := file.Stat()
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"Stating source file from cache %s",
-					source,
-				)
-			}
-
-			header, err := tar.FileInfoHeader(info, "")
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"Making header for source file %s",
-					source,
-				)
-			}
-			header.Name = source.FilePath
-
-			if err := w.WriteHeader(header); err != nil {
-				return errors.Wrapf(
-					err,
-					"Writing header for source file %s",
-					source,
-				)
-			}
-
-			if _, err := io.Copy(w, file); err != nil {
-				return errors.Wrapf(
-					err,
-					"Copying source file %s into output tar file",
-					source,
-				)
-			}
-
-			return nil
-		}(); err != nil {
-			return err
-		}
-	}
-	if err := w.Close(); err != nil {
-		return errors.Wrap(err, "Closing the tar archive")
-	}
-	if err := gz.Close(); err != nil {
-		return errors.Wrap(err, "Closing the gzip writer")
 	}
 	return nil
 }
@@ -445,27 +324,11 @@ func sourceBinaryParseInputs(
 			"Missing required argument 'sources'",
 		)
 	}
-	sourcesArray, ok := sourcesValue.(core.FrozenArray)
+	sources, ok := sourcesValue.(core.ArtifactID)
 	if !ok {
 		return sourceBinary{}, fmt.Errorf(
-			"'sources' argument must be a list",
-		)
-	}
-	if len(sourcesArray) < 1 {
-		return sourceBinary{}, fmt.Errorf(
-			"'sources' must contain at least one source",
-		)
-	}
-	sources := make([]core.ArtifactID, len(sourcesArray))
-	for i, sourceValue := range sourcesArray {
-		if source, ok := sourceValue.(core.ArtifactID); ok {
-			sources[i] = source
-			continue
-		}
-		return sourceBinary{}, fmt.Errorf(
-			"'sources' elements must be artifact IDs; found %T at index %d",
-			sourceValue,
-			i,
+			"'sources' argument must be a filegroup; got %T",
+			sourcesValue,
 		)
 	}
 
@@ -535,27 +398,11 @@ func sourceLibraryParseInputs(
 			"Missing required argument 'sources'",
 		)
 	}
-	sourcesArray, ok := sourcesValue.(core.FrozenArray)
+	sources, ok := sourcesValue.(core.ArtifactID)
 	if !ok {
 		return sourceLibrary{}, fmt.Errorf(
-			"'sources' argument must be a list",
-		)
-	}
-	if len(sourcesArray) < 1 {
-		return sourceLibrary{}, fmt.Errorf(
-			"'sources' must contain at least one source",
-		)
-	}
-	sources := make([]core.ArtifactID, len(sourcesArray))
-	for i, sourceValue := range sourcesArray {
-		if source, ok := sourceValue.(core.ArtifactID); ok {
-			sources[i] = source
-			continue
-		}
-		return sourceLibrary{}, fmt.Errorf(
-			"'sources' elements must be artifact IDs; found %T at index %d",
-			sourceValue,
-			i,
+			"'sources' argument must be a filegroup; got %T",
+			sourcesValue,
 		)
 	}
 

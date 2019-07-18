@@ -2,8 +2,9 @@ package core
 
 import (
 	"fmt"
-	"io"
 	"io/ioutil"
+	"log"
+	"os"
 	"path/filepath"
 
 	"github.com/pkg/errors"
@@ -44,33 +45,84 @@ func (f *freezer) freezeArray(a Array) ([]DAG, FrozenArray, error) {
 }
 
 func (f *freezer) freezeSourcePath(sp SourcePath) (ArtifactID, error) {
-	data, err := ioutil.ReadFile(filepath.Join(
-		f.root,
-		string(sp.Package),
-		sp.FilePath,
-	))
+	tmpDir, err := ioutil.TempDir("", "")
 	if err != nil {
-		return ArtifactID{}, err
+		return ArtifactID{}, errors.Wrap(err, "Creating temporary directory")
+	}
+	committed := false
+
+	defer func() {
+		if !committed {
+			if err := os.Remove(tmpDir); err != nil {
+				log.Printf("ERROR removing temporary directory %s", tmpDir)
+			}
+		}
+	}()
+
+	checksums := make([]uint32, len(sp.Paths)+1)
+	checksums[0] = ChecksumString(string(sp.Package))
+	for i, path := range sp.Paths {
+		data, err := ioutil.ReadFile(filepath.Join(
+			f.root,
+			string(sp.Package),
+			path,
+		))
+		if err != nil {
+			return ArtifactID{}, err
+		}
+
+		checksums[i+1] = JoinChecksums(
+			ChecksumString(path),
+			ChecksumBytes(data),
+		)
+
+		if err := func() error {
+			filePath := filepath.Join(tmpDir, path)
+			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+				return errors.Wrap(err, "Preparing parent directory")
+			}
+			file, err := os.Create(filePath)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				if err := file.Close(); err != nil {
+					log.Printf("ERROR closing file %s", filePath)
+				}
+			}()
+
+			if _, err := file.Write(data); err != nil {
+				return err
+			}
+
+			return nil
+		}(); err != nil {
+			return ArtifactID{}, errors.Wrapf(
+				err,
+				"Writing temp file for file %s in file group for package %s",
+				path,
+				sp.Package,
+			)
+		}
 	}
 
 	aid := ArtifactID{
-		FrozenTargetID: FrozenTargetID{
-			Package: sp.Package,
-			Target:  sp.Target,
-			Checksum: JoinChecksums(
-				ChecksumString(string(sp.Package)),
-				ChecksumString(string(sp.Target)),
-				ChecksumString(sp.FilePath),
-				ChecksumBytes(data),
-			),
-		},
-		FilePath: sp.FilePath,
+		Package:  sp.Package,
+		Checksum: JoinChecksums(checksums...),
 	}
 
-	return aid, f.cache.Write(aid, func(w io.Writer) error {
-		_, err := w.Write(data)
-		return err
-	})
+	if err := os.MkdirAll(filepath.Dir(f.cache.Path(aid)), 0755); err != nil {
+		return ArtifactID{}, errors.Wrapf(err, "Preparing directory in cache")
+	}
+	if err := os.RemoveAll(f.cache.Path(aid)); err != nil {
+		return ArtifactID{}, errors.Wrapf(err, "Removing old cache directory")
+	}
+	if err := os.Rename(tmpDir, f.cache.Path(aid)); err != nil {
+		return ArtifactID{}, errors.Wrap(err, "Committing temp dir to cache")
+	}
+	committed = true
+
+	return aid, nil
 }
 
 var ErrTargetNotFound = errors.New("Target not found")
@@ -107,7 +159,7 @@ func (f *freezer) freezeInput(i Input) ([]DAG, FrozenInput, error) {
 		if err != nil {
 			return nil, ArtifactID{}, errors.Wrapf(
 				err,
-				"Reading source path %s",
+				"Freezing source path %s",
 				x,
 			)
 		}

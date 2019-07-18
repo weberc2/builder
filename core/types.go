@@ -107,26 +107,14 @@ func (tid TargetID) Hash() (uint32, error) {
 func (tid TargetID) Type() string { return "Target" }
 
 type SourcePath struct {
-	Package  PackageName
-	Target   TargetName
-	FilePath string
-}
-
-func (sp SourcePath) ArtifactID(checksum uint32) ArtifactID {
-	return ArtifactID{
-		FrozenTargetID: FrozenTargetID{
-			Package:  sp.Package,
-			Target:   sp.Target,
-			Checksum: checksum,
-		},
-		FilePath: sp.FilePath,
-	}
+	Package PackageName
+	Paths   []string
 }
 
 func (sp SourcePath) Freeze() {}
 
 func (sp SourcePath) String() string {
-	return filepath.Join(string(sp.Package), string(sp.Target), sp.FilePath)
+	return fmt.Sprintf("%s:[%s]", sp.Package, strings.Join(sp.Paths, ", "))
 }
 
 func (sp SourcePath) Type() string { return "SourcePath" }
@@ -134,11 +122,12 @@ func (sp SourcePath) Type() string { return "SourcePath" }
 func (sp SourcePath) Truth() starlark.Bool { return starlark.Bool(true) }
 
 func (sp SourcePath) Hash() (uint32, error) {
-	return JoinChecksums(
-		ChecksumString(string(sp.Package)),
-		ChecksumString(string(sp.Target)),
-		ChecksumString(sp.FilePath),
-	), nil
+	checksums := make([]uint32, len(sp.Paths)+1)
+	checksums[0] = ChecksumString(string(sp.Package))
+	for i, path := range sp.Paths {
+		checksums[i+1] = ChecksumString(path)
+	}
+	return JoinChecksums(checksums...), nil
 }
 
 type TargetName string
@@ -188,7 +177,7 @@ func (ftid FrozenTargetID) String() string {
 }
 
 func (ftid FrozenTargetID) ArtifactID() ArtifactID {
-	return ArtifactID{FrozenTargetID: ftid}
+	return ArtifactID(ftid)
 }
 
 type FrozenField struct {
@@ -221,18 +210,13 @@ func (fa FrozenArray) ForEach(f func(i int, elt FrozenInput) error) error {
 	return nil
 }
 
-type ArtifactID struct {
-	FrozenTargetID
-	FilePath string
-}
+type ArtifactID FrozenTargetID
 
 func (aid ArtifactID) String() string {
-	return fmt.Sprintf(
-		"//%s:%s@%d",
-		aid.Package,
-		filepath.Join(string(aid.Target), aid.FilePath),
-		aid.Checksum,
-	)
+	if aid.Target == "" {
+		return fmt.Sprintf("//%s@%d", aid.Package, aid.Checksum)
+	}
+	return fmt.Sprintf("//%s:%s@%d", aid.Package, aid.Target, aid.Checksum)
 }
 
 func (aid ArtifactID) checksum() uint32 { return aid.Checksum }

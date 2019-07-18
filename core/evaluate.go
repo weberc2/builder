@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
@@ -27,45 +28,42 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 				if len(kwargs) > 0 {
 					return nil, fmt.Errorf("Unexpected keyword argument")
 				}
-				if len(args) != 1 {
-					return nil, fmt.Errorf(
-						"Expected 1 unnamed argument; found %d",
-						len(args),
-					)
-				}
 
-				if s, ok := args[0].(starlark.String); ok {
-					// `dir` is the absolute path to the package. We prefix the
-					// glob with this `dir` so we only grab the files in that
-					// directory (instead of the process's current working
-					// directory). The matches we get back are absolute paths,
-					// so we must convert them back into relative paths.
-					dir := filepath.Join(ev.Root, string(p))
-					matches, err := doublestar.Glob(filepath.Join(dir, string(s)))
-					if err != nil {
-						return nil, err
-					}
-
-					// convert absolute paths back to package-relative paths.
-					for i, match := range matches {
-						tmp, err := filepath.Rel(dir, match)
+				var allMatches []string
+				for _, arg := range args {
+					if s, ok := arg.(starlark.String); ok {
+						// `dir` is the absolute path to the package. We prefix
+						// the glob with this `dir` so we only grab the files
+						// in that directory (instead of the process's current
+						// working directory). The matches we get back are
+						// absolute paths, so we must convert them back into
+						// relative paths.
+						dir := filepath.Join(ev.Root, string(p))
+						matches, err := doublestar.Glob(filepath.Join(dir, string(s)))
 						if err != nil {
 							return nil, err
 						}
-						matches[i] = tmp
+
+						// convert absolute paths back to package-relative paths.
+						for i, match := range matches {
+							tmp, err := filepath.Rel(dir, match)
+							if err != nil {
+								return nil, err
+							}
+							matches[i] = tmp
+						}
+
+						allMatches = append(allMatches, matches...)
+						continue
 					}
 
-					values := make([]starlark.Value, len(matches))
-					for i, match := range matches {
-						values[i] = SourcePath{FilePath: match}
-					}
-					return starlark.NewList(values), nil
+					return nil, fmt.Errorf(
+						"TypeError: Expected str, got %T",
+						args[0],
+					)
 				}
 
-				return nil, fmt.Errorf(
-					"TypeError: Expected str, got %T",
-					args[0],
-				)
+				return SourcePath{Paths: allMatches}, nil
 			},
 		),
 		"file": starlark.NewBuiltin(
@@ -79,21 +77,27 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 				if len(kwargs) > 0 {
 					return nil, fmt.Errorf("Unexpected keyword argument")
 				}
-				if len(args) != 1 {
-					return nil, fmt.Errorf(
-						"Expected 1 unnamed argument; found %d",
-						len(args),
+				if len(args) < 1 {
+					return nil, errors.New(
+						"Expected at least 1 unnamed argument; found 0",
 					)
 				}
 
-				if s, ok := args[0].(starlark.String); ok {
-					return SourcePath{FilePath: string(s)}, nil
+				paths := make([]string, len(args))
+				for i, arg := range args {
+					if s, ok := arg.(starlark.String); ok {
+						paths[i] = string(s)
+						continue
+					}
+
+					return nil, fmt.Errorf(
+						"TypeError: Index %d: expected str, got %T",
+						i,
+						arg,
+					)
 				}
 
-				return nil, fmt.Errorf(
-					"TypeError: Expected str, got %T",
-					args[0],
-				)
+				return SourcePath{Paths: paths}, nil
 			},
 		),
 		"mktarget": starlark.NewBuiltin("mktarget", targets.newTarget),
@@ -253,7 +257,6 @@ func starlarkValueToInput(tid TargetID, value starlark.Value) (Input, error) {
 	switch x := value.(type) {
 	case SourcePath:
 		x.Package = tid.Package
-		x.Target = tid.Target
 		return x, nil
 	case TargetID:
 		return x, nil

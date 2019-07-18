@@ -59,11 +59,24 @@ func (c Cache) Write(id ArtifactID, f func(w io.Writer) error) error {
 
 func LocalCache(directory string) Cache {
 	return func(id ArtifactID) string {
+		if id.Target == "" {
+			return filepath.Join(
+				directory,
+				"packages",
+				string(id.Package),
+				"filegroups",
+				fmt.Sprint(id.Checksum),
+			)
+		}
+		if id.Package == "" {
+			id.Package = "__ROOT__"
+		}
 		return filepath.Join(
 			directory,
+			"packages",
 			string(id.Package),
+			"targets",
 			string(id.Target),
-			id.FilePath,
 			fmt.Sprint(id.Checksum),
 		)
 	}
