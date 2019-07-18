@@ -9,8 +9,8 @@ py_source_binary(
         file("src/sourcebinary/__init__.py"),
     ],
     dependencies = [
-        reftarget("examples/python/sourcelibrary:sourcelibrary"),
-        reftarget("3rdParty/python:requests"),
+        reftarget("//examples/python/sourcelibrary:sourcelibrary"),
+        reftarget("//3rdParty/python:requests"),
     ],
     entry_point = "main",
 )

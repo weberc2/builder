@@ -183,7 +183,6 @@ DEPENDENCIES:
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	log.Printf("DEBUG pex %s", strings.Join(args, " "))
 	if err := cmd.Run(); err != nil {
 		return errors.Wrapf(err, "Building pex for target %s", output)
 	}
@@ -287,11 +286,6 @@ func pypiLibraryInstall(
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
-		log.Printf(
-			"DEBUG pip wheel --no-deps -w %s %s",
-			cache.Path(output),
-			lib.packageName,
-		)
 		return errors.Wrap(err, "Installing pypi library")
 	}
 	return nil

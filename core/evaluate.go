@@ -100,7 +100,7 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 		"reftarget": starlark.NewBuiltin(
 			"reftarget",
 			func(
-				_ *starlark.Thread,
+				t *starlark.Thread,
 				_ *starlark.Builtin,
 				args starlark.Tuple,
 				kwargs []starlark.Tuple,
@@ -116,7 +116,11 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 				}
 
 				if s, ok := args[0].(starlark.String); ok {
-					return ParseTargetID(string(s))
+					return ParseTargetID(
+						ev.Root,
+						filepath.Join(ev.Root, t.Name),
+						string(s),
+					)
 				}
 
 				return nil, fmt.Errorf(

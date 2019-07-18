@@ -8,3 +8,7 @@ requests = pypi(
     name = "requests",
     dependencies = [certifi, chardet, idna, urllib3],
 )
+
+psycopg2_binary = pypi(name = "psycopg2-binary")
+aiopg = pypi(name = "aiopg", dependencies = [psycopg2_binary])
+aiotask_context = pypi(name = "aiotask_context")

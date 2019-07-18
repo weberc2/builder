@@ -16,15 +16,31 @@ type TargetID struct {
 	Target  TargetName
 }
 
-func ParseTargetID(s string) (TargetID, error) {
+var ErrInvalidTargetID = errors.New("Invalid target ID")
+
+func ParseTargetID(workspace, cwd, s string) (TargetID, error) {
 	i := strings.Index(string(s), ":")
-	if i < 1 { // must have a colon; can't be first character
-		return TargetID{}, fmt.Errorf("ValueError: Invalid target ref")
+	if i < 0 { // must have a colon
+		return TargetID{}, ErrInvalidTargetID
+	}
+
+	packageName := s[:i]
+
+	// If it's a relative package path, join it to the working directory and
+	// make it relative to the workspace
+	if !strings.HasPrefix(packageName, "//") {
+		result, err := filepath.Rel(workspace, filepath.Join(cwd, packageName))
+		if err != nil {
+			return TargetID{}, err
+		}
+		packageName = result
+	} else {
+		packageName = packageName[len("//"):]
 	}
 
 	return TargetID{
 		// trim trailing slashes from the package name
-		Package: PackageName(s[:i]),
+		Package: PackageName(packageName),
 		Target:  TargetName(s[i+1:]),
 	}, nil
 }
@@ -168,7 +184,7 @@ type ArtifactID struct {
 
 func (aid ArtifactID) String() string {
 	return fmt.Sprintf(
-		"%s:%s@%d",
+		"//%s:%s@%d",
 		aid.Package,
 		filepath.Join(string(aid.Target), aid.FilePath),
 		aid.Checksum,

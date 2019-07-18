@@ -102,13 +102,6 @@ func main() {
 		log.Fatal("USAGE: builder <build|run> <target>")
 	}
 
-	targetID, err := core.ParseTargetID(os.Args[2])
-	if err != nil {
-		log.Fatalf("Failed to parse target ID: %v", err)
-	}
-
-	cache := core.LocalCache("/tmp/cache")
-
 	pwd, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -117,6 +110,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	targetID, err := core.ParseTargetID(root, pwd, os.Args[2])
+	if err != nil {
+		log.Fatalf("Failed to parse target ID: %v", err)
+	}
+
+	cache := core.LocalCache("/tmp/cache")
 
 	dag, err := core.FreezeTargetID(
 		root,
@@ -127,8 +127,6 @@ func main() {
 	if err != nil {
 		if evalErr, ok := err.(*starlark.EvalError); ok {
 			log.Fatal(evalErr.Backtrace())
-		} else {
-			log.Printf("DEBUG err type: %T", err)
 		}
 		log.Fatal(err)
 	}
