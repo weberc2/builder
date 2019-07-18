@@ -1,8 +1,12 @@
 package core
 
 import (
-	"errors"
-	"log"
+	"bytes"
+	"io"
+	"os"
+
+	"github.com/fatih/color"
+	"github.com/pkg/errors"
 )
 
 var ErrPluginNotFound = errors.New("Plugin not found")
@@ -18,25 +22,52 @@ func LocalExecutor(plugins []Plugin, cache Cache, rebuild bool) ExecuteFunc {
 						dag.ID.ArtifactID(),
 					); err != ErrArtifactNotFound {
 						if err == nil {
-							log.Printf("Found artifact %s", dag.ID.ArtifactID())
+							color.Green("Found artifact %s", dag.ID.ArtifactID())
 						}
 						return err
 					}
-					log.Printf("Missing artifact %s", dag.ID.ArtifactID())
 				}
-				log.Printf("Building %s", dag.ID.ArtifactID())
+				color.Yellow("Building %s", dag.ID.ArtifactID())
 
 				buildScript, err := plugin.Factory(dag.BuilderArgs)
 				if err != nil {
 					return err
 				}
 
-				return buildScript(
-					dag.Inputs,
-					dag.ID.ArtifactID(),
+				var stdout, stderr bytes.Buffer
+				if err := buildScript(
+					dag,
 					cache,
-					dag.Dependencies,
-				)
+					&stdout,
+					&stderr,
+				); err != nil {
+					// If the build script failed, copy the build script's
+					// stdout and stderr to system stderr
+					if handleErr := func() error {
+						if _, err := io.Copy(os.Stderr, &stdout); err != nil {
+							return err
+						}
+
+						if _, err := color.New(color.FgRed).Fprintln(
+							os.Stderr,
+							stderr.String(),
+						); err != nil {
+							return err
+						}
+
+						return nil
+					}(); handleErr != nil {
+						err = errors.Wrapf(handleErr, "Handling '%v'", err)
+					}
+
+					return errors.Wrapf(
+						err,
+						"Building target %s",
+						dag.ID.ArtifactID(),
+					)
+				}
+
+				return nil
 			}
 		}
 

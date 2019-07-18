@@ -129,10 +129,11 @@ func fetchWheelPath(wheelDir string) (string, error) {
 }
 
 func sourceBinaryInstall(
-	output core.ArtifactID,
+	dag core.DAG,
 	cache core.Cache,
+	stdout io.Writer,
+	stderr io.Writer,
 	bin sourceBinary,
-	dependencies []core.DAG,
 ) error {
 	tmpWheelDir, err := ioutil.TempDir("", "")
 	if err != nil {
@@ -140,7 +141,13 @@ func sourceBinaryInstall(
 	}
 	defer os.Remove(tmpWheelDir)
 
-	if err := buildWheel(cache, bin.sources, tmpWheelDir); err != nil {
+	if err := buildWheel(
+		cache,
+		bin.sources,
+		tmpWheelDir,
+		stdout,
+		stderr,
+	); err != nil {
 		return errors.Wrap(err, "Creating wheel")
 	}
 
@@ -152,7 +159,7 @@ func sourceBinaryInstall(
 	var wheelPaths []string
 DEPENDENCIES:
 	for _, dependency := range bin.dependencies {
-		for _, target := range dependencies {
+		for _, target := range dag.Dependencies {
 			if dependency == target.ID.ArtifactID() {
 				targetWheelPaths, err := fetchWheelPaths(cache, target)
 				if err != nil {
@@ -174,23 +181,33 @@ DEPENDENCIES:
 	args = append(
 		args,
 		"-o",
-		cache.Path(output),
+		cache.Path(dag.ID.ArtifactID()),
 		"-e",
 		fmt.Sprintf("%s:%s", bin.packageName, bin.entryPoint),
 	)
 
+	fmt.Fprintln(stdout, "Running command: pex", strings.Join(args, " "))
 	cmd := exec.Command("pex", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		return errors.Wrapf(err, "Building pex for target %s", output)
+		return errors.Wrapf(
+			err,
+			"Building pex for target %s",
+			dag.ID.ArtifactID(),
+		)
 	}
 
 	return nil
 }
 
-func buildWheel(cache core.Cache, sources []core.ArtifactID, outputDir string) error {
+func buildWheel(
+	cache core.Cache,
+	sources []core.ArtifactID,
+	outputDir string,
+	stdout io.Writer,
+	stderr io.Writer,
+) error {
 	workspace, err := ioutil.TempDir("", "")
 	if err != nil {
 		return errors.Wrap(err, "Creating temp workspace directory")
@@ -234,9 +251,8 @@ func buildWheel(cache core.Cache, sources []core.ArtifactID, outputDir string) e
 	}
 
 	cmd := exec.Command("pip", "wheel", "--no-cache-dir", "-w", outputDir, ".")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.Dir = workspace
 
 	if err := cmd.Run(); err != nil {
@@ -259,9 +275,11 @@ type sourceLibrary struct {
 func sourceLibraryInstall2(
 	output core.ArtifactID,
 	cache core.Cache,
+	stdout io.Writer,
+	stderr io.Writer,
 	lib sourceLibrary,
 ) error {
-	return buildWheel(cache, lib.sources, cache.Path(output))
+	return buildWheel(cache, lib.sources, cache.Path(output), stdout, stderr)
 }
 
 type pypiLibrary struct {
@@ -272,6 +290,8 @@ type pypiLibrary struct {
 func pypiLibraryInstall(
 	output core.ArtifactID,
 	cache core.Cache,
+	stdout io.Writer,
+	stderr io.Writer,
 	lib pypiLibrary,
 ) error {
 	cmd := exec.Command(
@@ -282,9 +302,8 @@ func pypiLibraryInstall(
 		cache.Path(output),
 		lib.packageName,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		return errors.Wrap(err, "Installing pypi library")
 	}
@@ -591,44 +610,50 @@ func pypiLibraryParseInputs(inputs core.FrozenObject) (pypiLibrary, error) {
 }
 
 func sourceBinaryBuildScript(
-	inputs core.FrozenObject,
-	output core.ArtifactID,
+	dag core.DAG,
 	cache core.Cache,
-	dependencies []core.DAG,
+	stdout io.Writer,
+	stderr io.Writer,
 ) error {
-	bin, err := sourceBinaryParseInputs(inputs)
+	bin, err := sourceBinaryParseInputs(dag.Inputs)
 	if err != nil {
 		return err
 	}
-	return sourceBinaryInstall(output, cache, bin, dependencies)
+	return sourceBinaryInstall(dag, cache, stdout, stderr, bin)
 }
 
 func sourceLibraryBuildScript(
-	inputs core.FrozenObject,
-	output core.ArtifactID,
+	dag core.DAG,
 	cache core.Cache,
-	dependencies []core.DAG,
+	stdout io.Writer,
+	stderr io.Writer,
 ) error {
-	lib, err := sourceLibraryParseInputs(inputs)
+	lib, err := sourceLibraryParseInputs(dag.Inputs)
 	if err != nil {
 		return err
 	}
 
-	return sourceLibraryInstall2(output, cache, lib)
+	return sourceLibraryInstall2(
+		dag.ID.ArtifactID(),
+		cache,
+		stdout,
+		stderr,
+		lib,
+	)
 }
 
 func pypiLibraryBuildScript(
-	inputs core.FrozenObject,
-	output core.ArtifactID,
+	dag core.DAG,
 	cache core.Cache,
-	dependencies []core.DAG,
+	stdout io.Writer,
+	stderr io.Writer,
 ) error {
-	lib, err := pypiLibraryParseInputs(inputs)
+	lib, err := pypiLibraryParseInputs(dag.Inputs)
 	if err != nil {
 		return err
 	}
 
-	return pypiLibraryInstall(output, cache, lib)
+	return pypiLibraryInstall(dag.ID.ArtifactID(), cache, stdout, stderr, lib)
 }
 
 const (

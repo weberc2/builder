@@ -136,10 +136,10 @@ func loadGoBinaryInputs(
 }
 
 func goBinaryBuildScript(
-	inputs core.FrozenObject,
-	output core.ArtifactID,
+	dag core.DAG,
 	cache core.Cache,
-	dependencies []core.DAG,
+	stdout io.Writer,
+	stderr io.Writer,
 ) error {
 	tempdir, err := ioutil.TempDir("", "")
 	if err != nil {
@@ -147,7 +147,7 @@ func goBinaryBuildScript(
 	}
 	defer os.Remove(tempdir)
 
-	goBinInputs, err := parseGoBinaryInputs(inputs)
+	goBinInputs, err := parseGoBinaryInputs(dag.Inputs)
 	if err != nil {
 		return err
 	}
@@ -161,9 +161,10 @@ func goBinaryBuildScript(
 		return err
 	}
 
-	cmd := exec.Command("go", "build", "-o", cache.Path(output))
+	cmd := exec.Command("go", "build", "-o", cache.Path(dag.ID.ArtifactID()))
 	cmd.Dir = workspace
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 

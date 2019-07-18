@@ -41,26 +41,6 @@ func _build(cache core.Cache, dag core.DAG, rebuild bool) error {
 	return core.Build(
 		core.LocalExecutor(
 			[]core.Plugin{
-				// Load a "noop" plugin for testing
-				core.Plugin{
-					Type: "noop",
-					Factory: func(
-						args core.FrozenObject,
-					) (core.BuildScript, error) {
-						return func(
-							inputs core.FrozenObject,
-							output core.ArtifactID,
-							cache core.Cache,
-							dependencies []core.DAG,
-						) error {
-							return ioutil.WriteFile(
-								cache.Path(output),
-								[]byte("Done!"),
-								0644,
-							)
-						}, nil
-					},
-				},
 				plugins.GoBinary,
 				plugins.PySourceBinary,
 				plugins.PySourceLibrary,

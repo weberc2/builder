@@ -2,12 +2,13 @@ package core
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash/adler32"
+	"io"
 	"path/filepath"
 	"strings"
 
+	"github.com/pkg/errors"
 	"go.starlark.net/starlark"
 )
 
@@ -16,12 +17,32 @@ type TargetID struct {
 	Target  TargetName
 }
 
-var ErrInvalidTargetID = errors.New("Invalid target ID")
+type InvalidTargetIDErr string
+
+func (err InvalidTargetIDErr) Error() string {
+	return fmt.Sprintf("Invalid target ID: %s", string(err))
+}
+
+type PackageNameNotInWorkspaceErr struct {
+	Workspace        string
+	WorkingDirectory string
+	PackageName      string
+}
+
+func (err PackageNameNotInWorkspaceErr) Error() string {
+	return fmt.Sprintf(
+		"Package name %s (relative to working directory %s) not in "+
+			"workspace %s",
+		err.PackageName,
+		err.WorkingDirectory,
+		err.Workspace,
+	)
+}
 
 func ParseTargetID(workspace, cwd, s string) (TargetID, error) {
 	i := strings.Index(string(s), ":")
 	if i < 0 { // must have a colon
-		return TargetID{}, ErrInvalidTargetID
+		return TargetID{}, InvalidTargetIDErr(s)
 	}
 
 	packageName := s[:i]
@@ -33,9 +54,32 @@ func ParseTargetID(workspace, cwd, s string) (TargetID, error) {
 		if err != nil {
 			return TargetID{}, err
 		}
+
+		// In cases where the package name == cwd == workspace, result will be
+		// '.' such that `//.` is considered different than `//` even though
+		// these are clearly pointing to the same package. We need to normalize
+		// this.
+		if result == "." {
+			result = ""
+		}
 		packageName = result
 	} else {
+		if strings.HasPrefix(packageName, "//./") {
+			return TargetID{}, InvalidTargetIDErr(s)
+		}
 		packageName = packageName[len("//"):]
+	}
+
+	if strings.HasPrefix(packageName, "../") {
+		return TargetID{}, errors.Wrapf(
+			PackageNameNotInWorkspaceErr{
+				Workspace:        workspace,
+				WorkingDirectory: cwd,
+				PackageName:      packageName,
+			},
+			"While parsing target ID %s",
+			s,
+		)
 	}
 
 	return TargetID{
@@ -246,7 +290,7 @@ type FrozenTarget struct {
 
 type BuilderType string
 
-type BuildScript func(inputs FrozenObject, out ArtifactID, cache Cache, dependencies []DAG) error
+type BuildScript func(dag DAG, cache Cache, stdout, stderr io.Writer) error
 
 type Plugin struct {
 	Type    BuilderType
