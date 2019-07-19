@@ -71,7 +71,7 @@ func LocalExecutor(plugins []Plugin, cache Cache, rebuild bool) ExecuteFunc {
 			}
 		}
 
-		return ErrPluginNotFound
+		return errors.Wrapf(ErrPluginNotFound, "plugin = %s", dag.BuilderType)
 	}
 }
 
