@@ -46,6 +46,7 @@ func _build(cache core.Cache, dag core.DAG, rebuild bool) error {
 				plugins.PySourceLibrary,
 				plugins.PyPypiLibrary,
 				plugins.PyTest,
+				plugins.PyVirtualEnv,
 			},
 			cache,
 			rebuild,

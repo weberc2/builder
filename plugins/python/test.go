@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/pkg/errors"
 	"github.com/weberc2/builder/core"
@@ -15,7 +14,7 @@ import (
 
 type test struct {
 	directory    string
-	dependencies []core.ArtifactID
+	dependencies core.ArtifactID
 	sources      core.ArtifactID
 }
 
@@ -39,22 +38,10 @@ func testParseInputs(inputs core.FrozenObject) (test, error) {
 			"Missing required argument 'dependencies'",
 		)
 	}
-	dependenciesArray, ok := dependenciesValue.(core.FrozenArray)
+	dependencies, ok := dependenciesValue.(core.ArtifactID)
 	if !ok {
 		return test{}, fmt.Errorf(
-			"'dependencies' argument must be a list",
-		)
-	}
-	dependencies := make([]core.ArtifactID, len(dependenciesArray))
-	for i, dependencyValue := range dependenciesArray {
-		if dependency, ok := dependencyValue.(core.ArtifactID); ok {
-			dependencies[i] = dependency
-			continue
-		}
-		return test{}, fmt.Errorf(
-			"'dependencies' elements must be artifact IDs; found %T at index %d",
-			dependencyValue,
-			i,
+			"'dependencies' argument must be a py_virtualenv target",
 		)
 	}
 
@@ -99,23 +86,6 @@ func testRun(
 	stderr io.Writer,
 	test test,
 ) error {
-	var wheelPaths []string
-DEPENDENCIES:
-	for _, dependency := range test.dependencies {
-		for _, target := range dag.Dependencies {
-			if dependency == target.ID.ArtifactID() {
-				targetWheelPaths, err := fetchWheelPaths(cache, target)
-				if err != nil {
-					return err
-				}
-
-				wheelPaths = append(wheelPaths, targetWheelPaths...)
-				continue DEPENDENCIES
-			}
-		}
-		return errors.Wrapf(ErrUnknownTarget, "Target = %s", dependency)
-	}
-
 	tmpDir, err := ioutil.TempDir("", "")
 	if err != nil {
 		return errors.Wrap(err, "Creating temp dir")
@@ -130,16 +100,14 @@ DEPENDENCIES:
 		}
 		defer outputFile.Close()
 
-		pythonPath := fmt.Sprintf(
-			"PYTHONPATH=%s",
-			strings.Join(wheelPaths, ":"),
-		)
-		fmt.Fprintln(stdout, pythonPath)
 		cmd := exec.Command("pytest")
 		cmd.Stdout = io.MultiWriter(stdout, outputFile)
 		cmd.Stderr = stderr
 		cmd.Dir = filepath.Join(cache.Path(test.sources), test.directory)
-		cmd.Env = append(os.Environ(), pythonPath)
+		cmd.Env = append(
+			os.Environ(),
+			fmt.Sprintf("PYTHONPATH=%s", cache.Path(test.dependencies)),
+		)
 		if err := cmd.Run(); err != nil {
 			return errors.Wrapf(err, "Running pytest")
 		}

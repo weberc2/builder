@@ -10,3 +10,4 @@ var PySourceBinary = python.SourceBinary
 var PySourceLibrary = python.SourceLibrary
 var PyPypiLibrary = python.PypiLibrary
 var PyTest = python.Test
+var PyVirtualEnv = python.VirtualEnv

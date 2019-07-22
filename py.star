@@ -71,6 +71,7 @@ def py_test(name, sources, directory = None, dependencies = None):
                 py_pypi_library(name = "more-itertools"),
                 py_pypi_library(name = "atomicwrites"),
                 py_pypi_library(name = "pluggy"),
+                py_pypi_library(name = "py"),
                 py_pypi_library(name = "importlib-metadata"),
                 py_pypi_library(name = "wcwidth"),
                 py_pypi_library(name = "pyparsing"),
@@ -84,7 +85,17 @@ def py_test(name, sources, directory = None, dependencies = None):
         args = {
             "sources": sources,
             "directory": directory,
-            "dependencies": dependencies,
+            "dependencies": py_virtualenv(
+                name = "{}_dependencies".format(name),
+                dependencies = dependencies,
+            ),
         },
         type = "py_test",
+    )
+
+def py_virtualenv(name, dependencies):
+    return mktarget(
+        name = name,
+        args = {"dependencies": dependencies},
+        type = "py_virtualenv",
     )

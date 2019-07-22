@@ -15,10 +15,7 @@ import (
 
 var ErrUnknownTarget = errors.New("Unknown target")
 
-func fetchWheelPaths(
-	cache core.Cache,
-	dag core.DAG,
-) ([]string, error) {
+func fetchWheelPaths(cache core.Cache, dag core.DAG) ([]string, error) {
 	if !isValidDependencyType(dag.BuilderType) {
 		return nil, errors.Wrapf(
 			ErrInvalidDependencyType,
@@ -154,6 +151,7 @@ const (
 	BuilderTypeSourceLibrary core.BuilderType = "py_source_library"
 	BuilderTypePypiLibrary   core.BuilderType = "py_pypi_library"
 	BuilderTypeTest          core.BuilderType = "py_test"
+	BuilderTypeVirtualEnv    core.BuilderType = "py_virtualenv"
 )
 
 func isValidDependencyType(dependencyType core.BuilderType) bool {
