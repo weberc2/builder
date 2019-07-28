@@ -41,7 +41,9 @@ func _build(cache core.Cache, dag core.DAG, rebuild bool) error {
 	return core.Build(
 		core.LocalExecutor(
 			[]core.Plugin{
+				plugins.GitClone,
 				plugins.GoBinary,
+				plugins.GoLibrary,
 				plugins.PySourceBinary,
 				plugins.PySourceLibrary,
 				plugins.PyPypiLibrary,

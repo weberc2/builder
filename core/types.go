@@ -185,9 +185,26 @@ type FrozenField struct {
 	Value FrozenInput
 }
 
+type TypeErr struct {
+	Wanted string
+	Got    string
+}
+
+func (err TypeErr) Error() string {
+	return fmt.Sprintf("TypeError: expected %s, found %s", err.Wanted, err.Got)
+}
+
+func NewTypeErr(wanted string, v interface{}) TypeErr {
+	return TypeErr{Wanted: wanted, Got: fmt.Sprintf("%T", v)}
+}
+
 type FrozenObject []FrozenField
 
-var ErrKeyNotFound = errors.New("Key not found")
+type KeyNotFoundErr string
+
+func (err KeyNotFoundErr) Error() string {
+	return fmt.Sprintf("Key not found: %s", string(err))
+}
 
 func (fo FrozenObject) Get(key string) (FrozenInput, error) {
 	for _, field := range fo {
@@ -195,7 +212,18 @@ func (fo FrozenObject) Get(key string) (FrozenInput, error) {
 			return field.Value, nil
 		}
 	}
-	return nil, ErrKeyNotFound
+	return nil, KeyNotFoundErr(key)
+}
+
+func (fo FrozenObject) GetString(key string) (String, error) {
+	v, err := fo.Get(key)
+	if err != nil {
+		return "", err
+	}
+	if s, ok := v.(String); ok {
+		return s, nil
+	}
+	return "", errors.Wrapf(NewTypeErr("String", v), "Key '%s'", key)
 }
 
 type FrozenArray []FrozenInput
@@ -208,6 +236,25 @@ func (fa FrozenArray) ForEach(f func(i int, elt FrozenInput) error) error {
 	}
 
 	return nil
+}
+
+func (fa FrozenArray) StringSlice() ([]string, error) {
+	output := make([]string, len(fa))
+	for i, v := range fa {
+		if s, ok := v.(String); ok {
+			output[i] = string(s)
+			continue
+		}
+		return nil, errors.Wrapf(NewTypeErr("String", v), "Index %d", i)
+	}
+	return output, nil
+}
+
+func (fa FrozenArray) GetString(i int) (String, error) {
+	if s, ok := fa[i].(String); ok {
+		return s, nil
+	}
+	return "", NewTypeErr("String", fa[i])
 }
 
 type ArtifactID FrozenTargetID
