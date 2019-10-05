@@ -29,13 +29,8 @@ func LocalExecutor(plugins []Plugin, cache Cache, rebuild bool) ExecuteFunc {
 				}
 				color.Yellow("Building %s", dag.ID.ArtifactID())
 
-				buildScript, err := plugin.Factory(dag.BuilderArgs)
-				if err != nil {
-					return err
-				}
-
 				var stdout, stderr bytes.Buffer
-				if err := buildScript(
+				if err := plugin.BuildScript(
 					dag,
 					cache,
 					&stdout,

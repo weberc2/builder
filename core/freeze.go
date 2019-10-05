@@ -188,7 +188,6 @@ func (f freezer) freezeTarget(t Target) (DAG, error) {
 			},
 			Inputs:      frozenInputs,
 			BuilderType: t.BuilderType,
-			BuilderArgs: nil, // TODO: Freeze builder args?
 		},
 		Dependencies: deps,
 	}, nil

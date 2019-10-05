@@ -490,29 +490,18 @@ OUTER:
 }
 
 var Library = core.Plugin{
-	Type: "go_module",
-	Factory: func(core.FrozenObject) (core.BuildScript, error) {
-		return func(
-			dag core.DAG,
-			cache core.Cache,
-			stdout io.Writer,
-			stderr io.Writer,
-		) error {
-			return libraryBuildScript2(dag, cache, stdout, stderr)
-		}, nil
-	},
+	Type:        "go_module",
+	BuildScript: libraryBuildScript2,
 }
 
 var Binary = core.Plugin{
 	Type: "go_binary",
-	Factory: func(core.FrozenObject) (core.BuildScript, error) {
-		return func(
-			dag core.DAG,
-			cache core.Cache,
-			stdout io.Writer,
-			stderr io.Writer,
-		) error {
-			return libraryBuildScript(dag, cache, stdout, stderr, true)
-		}, nil
+	BuildScript: func(
+		dag core.DAG,
+		cache core.Cache,
+		stdout io.Writer,
+		stderr io.Writer,
+	) error {
+		return libraryBuildScript(dag, cache, stdout, stderr, true)
 	},
 }

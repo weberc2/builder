@@ -135,9 +135,4 @@ func testRun(
 	return nil
 }
 
-var Test = core.Plugin{
-	Type: BuilderTypeTest,
-	Factory: func(args core.FrozenObject) (core.BuildScript, error) {
-		return testBuildScript, nil
-	},
-}
+var Test = core.Plugin{Type: BuilderTypeTest, BuildScript: testBuildScript}

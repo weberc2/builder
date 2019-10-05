@@ -208,7 +208,6 @@ type Target struct {
 	ID          TargetID
 	Inputs      Object
 	BuilderType BuilderType
-	BuilderArgs Object
 }
 
 type FrozenTargetID struct {
@@ -361,7 +360,6 @@ type FrozenTarget struct {
 	ID          FrozenTargetID
 	Inputs      FrozenObject
 	BuilderType BuilderType
-	BuilderArgs FrozenObject
 }
 
 type BuilderType string
@@ -369,8 +367,8 @@ type BuilderType string
 type BuildScript func(dag DAG, cache Cache, stdout, stderr io.Writer) error
 
 type Plugin struct {
-	Type    BuilderType
-	Factory func(args FrozenObject) (BuildScript, error)
+	Type        BuilderType
+	BuildScript BuildScript
 }
 
 type DAG struct {

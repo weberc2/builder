@@ -110,8 +110,6 @@ func sourceLibraryBuildScript(
 }
 
 var SourceLibrary = core.Plugin{
-	Type: BuilderTypeSourceLibrary,
-	Factory: func(args core.FrozenObject) (core.BuildScript, error) {
-		return sourceLibraryBuildScript, nil
-	},
+	Type:        BuilderTypeSourceLibrary,
+	BuildScript: sourceLibraryBuildScript,
 }

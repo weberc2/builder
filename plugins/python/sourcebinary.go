@@ -179,8 +179,6 @@ func sourceBinaryBuildScript(
 }
 
 var SourceBinary = core.Plugin{
-	Type: BuilderTypeSourceBinary,
-	Factory: func(args core.FrozenObject) (core.BuildScript, error) {
-		return sourceBinaryBuildScript, nil
-	},
+	Type:        BuilderTypeSourceBinary,
+	BuildScript: sourceBinaryBuildScript,
 }

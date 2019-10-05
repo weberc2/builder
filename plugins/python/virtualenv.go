@@ -189,8 +189,6 @@ func virtualEnvPrepare(
 }
 
 var VirtualEnv = core.Plugin{
-	Type: BuilderTypeVirtualEnv,
-	Factory: func(args core.FrozenObject) (core.BuildScript, error) {
-		return virtualEnvBuildScript, nil
-	},
+	Type:        BuilderTypeVirtualEnv,
+	BuildScript: virtualEnvBuildScript,
 }

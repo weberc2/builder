@@ -67,9 +67,4 @@ func gitCloneBuildScript(
 	return nil
 }
 
-var Clone = core.Plugin{
-	Type: "git_clone",
-	Factory: func(core.FrozenObject) (core.BuildScript, error) {
-		return gitCloneBuildScript, nil
-	},
-}
+var Clone = core.Plugin{Type: "git_clone", BuildScript: gitCloneBuildScript}

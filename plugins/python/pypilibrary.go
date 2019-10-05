@@ -109,8 +109,6 @@ func pypiLibraryBuildScript(
 }
 
 var PypiLibrary = core.Plugin{
-	Type: BuilderTypePypiLibrary,
-	Factory: func(args core.FrozenObject) (core.BuildScript, error) {
-		return pypiLibraryBuildScript, nil
-	},
+	Type:        BuilderTypePypiLibrary,
+	BuildScript: pypiLibraryBuildScript,
 }
