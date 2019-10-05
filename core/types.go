@@ -17,6 +17,10 @@ type TargetID struct {
 	Target  TargetName
 }
 
+func (tid TargetID) String() string {
+	return fmt.Sprintf("%s/%s", tid.Package, tid.Target)
+}
+
 type InvalidTargetIDErr string
 
 func (err InvalidTargetIDErr) Error() string {
@@ -89,32 +93,29 @@ func ParseTargetID(workspace, cwd, s string) (TargetID, error) {
 	}, nil
 }
 
-func (tid TargetID) Freeze() {}
+func (t Target) Freeze() {}
 
-func (tid TargetID) String() string {
-	return fmt.Sprintf("%s/%s", tid.Package, tid.Target)
+func (t Target) String() string {
+	return fmt.Sprintf("Target(%s)", t.ID)
 }
 
-func (tid TargetID) Truth() starlark.Bool { return starlark.Bool(true) }
+func (t Target) Truth() starlark.Bool { return starlark.Bool(true) }
 
-func (tid TargetID) Hash() (uint32, error) {
-	return JoinChecksums(
-		ChecksumString(string(tid.Package)),
-		ChecksumString(string(tid.Target)),
-	), nil
+func (t Target) Hash() (uint32, error) {
+	return t.hash(), nil
 }
 
-func (tid TargetID) Type() string { return "Target" }
+func (t Target) Type() string { return "Target" }
 
 type FileGroup struct {
-	Package PackageName
-	Paths   []string
+	Package  PackageName
+	Patterns []string
 }
 
 func (fg FileGroup) Freeze() {}
 
 func (fg FileGroup) String() string {
-	return fmt.Sprintf("%s:[%s]", fg.Package, strings.Join(fg.Paths, ", "))
+	return fmt.Sprintf("%s:[%s]", fg.Package, strings.Join(fg.Patterns, ", "))
 }
 
 func (fg FileGroup) Type() string { return "FileGroup" }
@@ -122,12 +123,7 @@ func (fg FileGroup) Type() string { return "FileGroup" }
 func (fg FileGroup) Truth() starlark.Bool { return starlark.Bool(true) }
 
 func (fg FileGroup) Hash() (uint32, error) {
-	checksums := make([]uint32, len(fg.Paths)+1)
-	checksums[0] = ChecksumString(string(fg.Package))
-	for i, path := range fg.Paths {
-		checksums[i+1] = ChecksumString(path)
-	}
-	return JoinChecksums(checksums...), nil
+	return fg.hash(), nil
 }
 
 type TargetName string
@@ -149,15 +145,64 @@ type Object []Field
 
 type Array []Input
 
-type Input interface{ input() }
+type Input interface {
+	input()
+	hash() uint32
+}
 
-func (tid TargetID) input() {}
+func (t Target) input() {}
+func (t Target) hash() uint32 {
+	return JoinChecksums(
+		ChecksumString(string(t.ID.Package)),
+		ChecksumString(string(t.ID.Target)),
+		t.Inputs.hash(),
+		ChecksumString(string(t.BuilderType)),
+	)
+}
 func (fg FileGroup) input() {}
-func (i Int) input()        {}
-func (s String) input()     {}
-func (b Bool) input()       {}
-func (o Object) input()     {}
-func (a Array) input()      {}
+func (fg FileGroup) hash() uint32 {
+	checksums := make([]uint32, len(fg.Patterns)+1)
+	checksums[0] = ChecksumString(string(fg.Package))
+	for i, pattern := range fg.Patterns {
+		checksums[i+1] = ChecksumString(pattern)
+	}
+	return JoinChecksums(checksums...)
+}
+func (i Int) input() {}
+func (i Int) hash() uint32 {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(i))
+	return ChecksumBytes(buf[:])
+}
+func (s String) input()       {}
+func (s String) hash() uint32 { return ChecksumString(string(s)) }
+func (b Bool) input()         {}
+func (b Bool) hash() uint32 {
+	var i uint16
+	if bool(b) {
+		i = 1
+	}
+	var buf [2]byte
+	binary.BigEndian.PutUint16(buf[:], i)
+	return ChecksumBytes(buf[:])
+}
+func (o Object) input() {}
+func (o Object) hash() uint32 {
+	checksums := make([]uint32, 2*len(o))
+	for i, f := range o {
+		checksums[2*i] = ChecksumString(f.Key)
+		checksums[2*i+1] = f.Value.hash()
+	}
+	return JoinChecksums(checksums...)
+}
+func (a Array) input() {}
+func (a Array) hash() uint32 {
+	checksums := make([]uint32, len(a))
+	for i, v := range a {
+		checksums[i] = v.hash()
+	}
+	return JoinChecksums(checksums...)
+}
 
 type Target struct {
 	ID          TargetID

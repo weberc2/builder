@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 
 	"github.com/weberc2/builder/core"
-	"github.com/weberc2/builder/plugins"
+	"github.com/weberc2/builder/plugins/git"
+	"github.com/weberc2/builder/plugins/golang"
+	"github.com/weberc2/builder/plugins/python"
 	"go.starlark.net/starlark"
 )
 
@@ -41,14 +43,14 @@ func _build(cache core.Cache, dag core.DAG, rebuild bool) error {
 	return core.Build(
 		core.LocalExecutor(
 			[]core.Plugin{
-				plugins.GitClone,
-				plugins.GoBinary,
-				plugins.GoLibrary,
-				plugins.PySourceBinary,
-				plugins.PySourceLibrary,
-				plugins.PyPypiLibrary,
-				plugins.PyTest,
-				plugins.PyVirtualEnv,
+				git.Clone,
+				golang.Library,
+				golang.Binary,
+				python.SourceBinary,
+				python.SourceLibrary,
+				python.PypiLibrary,
+				python.Test,
+				python.VirtualEnv,
 			},
 			cache,
 			rebuild,
@@ -69,6 +71,17 @@ func run(cache core.Cache, dag core.DAG) error {
 	return cmd.Run()
 }
 
+func graph(dag core.DAG) {
+	for _, dependency := range dag.Dependencies {
+		graph(dependency)
+	}
+
+	fmt.Printf("%s:\n", dag.ID)
+	for _, dependency := range dag.Dependencies {
+		fmt.Printf("  %s\n", dependency.ID)
+	}
+}
+
 func main() {
 	var command func(core.Cache, core.DAG) error
 	if len(os.Args) > 2 {
@@ -79,6 +92,11 @@ func main() {
 			command = rebuild
 		case "run":
 			command = run
+		case "graph":
+			command = func(_ core.Cache, dag core.DAG) error {
+				graph(dag)
+				return nil
+			}
 		}
 	}
 
@@ -100,14 +118,26 @@ func main() {
 		log.Fatalf("Failed to parse target ID: %v", err)
 	}
 
+	var t *core.Target
+	targets, err := core.Evaluator{
+		LibRoot:     filepath.Join(root, "plugins"),
+		PackageRoot: root,
+	}.Evaluate(targetID.Package)
+	if err != nil {
+		log.Fatalf("Evaluation error: %v", err)
+	}
+	for i, target := range targets {
+		if target.ID == targetID {
+			t = &targets[i]
+		}
+	}
+	if t == nil {
+		log.Fatalf("Couldn't find target %s", targetID)
+	}
+
 	cache := core.LocalCache("/tmp/cache")
 
-	dag, err := core.FreezeTargetID(
-		root,
-		cache,
-		core.Evaluator{root},
-		targetID,
-	)
+	dag, err := core.FreezeTarget(root, cache, *t)
 	if err != nil {
 		if evalErr, ok := err.(*starlark.EvalError); ok {
 			log.Fatal(evalErr.Backtrace())

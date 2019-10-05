@@ -7,30 +7,20 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bmatcuk/doublestar"
 	"github.com/pkg/errors"
 )
 
-func FreezeTargetID(
-	root string,
-	cache Cache,
-	evaluator Evaluator,
-	targetID TargetID,
-) (DAG, error) {
-	f := freezer{
-		root:      root,
-		cache:     cache,
-		evaluator: evaluator,
-	}
-	return f.freezeTargetID(targetID)
+func FreezeTarget(root string, cache Cache, target Target) (DAG, error) {
+	return freezer.freezeTarget(freezer{root: root, cache: cache}, target)
 }
 
 type freezer struct {
-	root      string
-	evaluator Evaluator
-	cache     Cache
+	root  string
+	cache Cache
 }
 
-func (f *freezer) freezeArray(a Array) ([]DAG, FrozenArray, error) {
+func (f freezer) freezeArray(a Array) ([]DAG, FrozenArray, error) {
 	var deps []DAG
 	out := make(FrozenArray, len(a))
 	for i, elt := range a {
@@ -59,50 +49,51 @@ func (f *freezer) freezeFileGroup(fg FileGroup) (ArtifactID, error) {
 		}
 	}()
 
-	checksums := make([]uint32, len(fg.Paths)+1)
-	checksums[0] = ChecksumString(string(fg.Package))
-	for i, path := range fg.Paths {
-		data, err := ioutil.ReadFile(filepath.Join(
-			f.root,
-			string(fg.Package),
-			path,
-		))
+	checksums := []uint32{ChecksumString(string(fg.Package))}
+	for _, pattern := range fg.Patterns {
+		matches, err := doublestar.Glob(
+			filepath.Join(f.root, string(fg.Package), pattern),
+		)
 		if err != nil {
 			return ArtifactID{}, err
 		}
 
-		checksums[i+1] = JoinChecksums(
-			ChecksumString(path),
-			ChecksumBytes(data),
-		)
-
-		if err := func() error {
-			filePath := filepath.Join(tmpDir, path)
-			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-				return errors.Wrap(err, "Preparing parent directory")
-			}
-			file, err := os.Create(filePath)
+		for _, match := range matches {
+			data, err := ioutil.ReadFile(match)
 			if err != nil {
-				return err
+				return ArtifactID{}, err
 			}
-			defer func() {
-				if err := file.Close(); err != nil {
-					log.Printf("ERROR closing file %s", filePath)
-				}
-			}()
-
-			if _, err := file.Write(data); err != nil {
-				return err
-			}
-
-			return nil
-		}(); err != nil {
-			return ArtifactID{}, errors.Wrapf(
-				err,
-				"Writing temp file for file %s in file group for package %s",
-				path,
-				fg.Package,
+			relpath, err := filepath.Rel(
+				filepath.Join(f.root, string(fg.Package)),
+				match,
 			)
+			if err != nil {
+				return ArtifactID{}, err
+			}
+			checksums = append(
+				checksums,
+				JoinChecksums(ChecksumString(relpath), ChecksumBytes(data)),
+			)
+
+			if err := func() error {
+				filePath := filepath.Join(tmpDir, relpath)
+				if err := os.MkdirAll(
+					filepath.Dir(filePath),
+					0755,
+				); err != nil {
+					return errors.Wrap(err, "Preparing parent directory")
+				}
+
+				return ioutil.WriteFile(filePath, data, 0644)
+			}(); err != nil {
+				return ArtifactID{}, errors.Wrapf(
+					err,
+					"Writing temp file for file %s in file group for "+
+						"package %s",
+					relpath,
+					fg.Package,
+				)
+			}
 		}
 	}
 
@@ -127,29 +118,10 @@ func (f *freezer) freezeFileGroup(fg FileGroup) (ArtifactID, error) {
 
 var ErrTargetNotFound = errors.New("Target not found")
 
-func (f *freezer) freezeTargetID(tid TargetID) (DAG, error) {
-	targets, err := f.evaluator.Evaluate(tid.Package)
-	if err != nil {
-		return DAG{}, err
-	}
-
-	for _, target := range targets {
-		if target.ID == tid {
-			dag, err := f.freezeTarget(target)
-			if err != nil {
-				return DAG{}, errors.Wrapf(err, "Freezing target %s", tid)
-			}
-			return dag, nil
-		}
-	}
-
-	return DAG{}, errors.Wrapf(ErrTargetNotFound, "Target %s", tid)
-}
-
-func (f *freezer) freezeInput(i Input) ([]DAG, FrozenInput, error) {
+func (f freezer) freezeInput(i Input) ([]DAG, FrozenInput, error) {
 	switch x := i.(type) {
-	case TargetID:
-		dag, err := f.freezeTargetID(x)
+	case Target:
+		dag, err := f.freezeTarget(x)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -195,7 +167,7 @@ func (f *freezer) freezeObject(o Object) ([]DAG, FrozenObject, error) {
 	return deps, out, nil
 }
 
-func (f *freezer) freezeTarget(t Target) (DAG, error) {
+func (f freezer) freezeTarget(t Target) (DAG, error) {
 	deps, frozenInputs, err := f.freezeObject(t.Inputs)
 	if err != nil {
 		return DAG{}, err

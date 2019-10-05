@@ -57,12 +57,12 @@ def py_pypi_library(
         type = "py_pypi_library",
     )
 
-def py_test(name, sources, directory = None, dependencies = None):
+def py_test(name, sources, pytest, directory = None, dependencies = None):
     if directory == None:
         directory = ""
     if dependencies == None:
         dependencies = []
-    dependencies.append(reftarget("//plugins/python:pytest"))
+    dependencies.append(pytest)
     return mktarget(
         name = name,
         args = {

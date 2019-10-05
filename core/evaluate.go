@@ -1,148 +1,35 @@
 package core
 
 import (
-	"errors"
 	"fmt"
-	"io/ioutil"
 	"path/filepath"
 	"strings"
 
-	"github.com/bmatcuk/doublestar"
-
+	"github.com/pkg/errors"
 	"go.starlark.net/starlark"
 )
 
-type Evaluator struct{ Root string }
+// Evaluator evaluates the macro language into distinct target definitions.
+type Evaluator struct {
+	// PackageRoot is the directory that contains all packages.
+	PackageRoot string
 
-func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
-	var targets targets
-	builtins := starlark.StringDict{
-		"glob": starlark.NewBuiltin(
-			"glob",
-			func(
-				_ *starlark.Thread,
-				_ *starlark.Builtin,
-				args starlark.Tuple,
-				kwargs []starlark.Tuple,
-			) (starlark.Value, error) {
-				if len(kwargs) > 0 {
-					return nil, fmt.Errorf("Unexpected keyword argument")
-				}
+	// LibRoot is the directory that contains all libraries.
+	LibRoot string
+}
 
-				var allMatches []string
-				for _, arg := range args {
-					if s, ok := arg.(starlark.String); ok {
-						// `dir` is the absolute path to the package. We prefix
-						// the glob with this `dir` so we only grab the files
-						// in that directory (instead of the process's current
-						// working directory). The matches we get back are
-						// absolute paths, so we must convert them back into
-						// relative paths.
-						dir := filepath.Join(ev.Root, string(p))
-						matches, err := doublestar.Glob(filepath.Join(dir, string(s)))
-						if err != nil {
-							return nil, err
-						}
+type entry struct {
+	globals starlark.StringDict
+	err     error
+}
 
-						// convert absolute paths back to package-relative paths.
-						for i, match := range matches {
-							tmp, err := filepath.Rel(dir, match)
-							if err != nil {
-								return nil, err
-							}
-							matches[i] = tmp
-						}
+type cache map[string]*entry
 
-						allMatches = append(allMatches, matches...)
-						continue
-					}
-
-					return nil, fmt.Errorf(
-						"TypeError: Expected str, got %T",
-						args[0],
-					)
-				}
-
-				return FileGroup{Paths: allMatches}, nil
-			},
-		),
-		"file": starlark.NewBuiltin(
-			"file",
-			func(
-				th *starlark.Thread,
-				_ *starlark.Builtin,
-				args starlark.Tuple,
-				kwargs []starlark.Tuple,
-			) (starlark.Value, error) {
-				if len(kwargs) > 0 {
-					return nil, fmt.Errorf("Unexpected keyword argument")
-				}
-				if len(args) < 1 {
-					return nil, errors.New(
-						"Expected at least 1 unnamed argument; found 0",
-					)
-				}
-
-				paths := make([]string, len(args))
-				for i, arg := range args {
-					if s, ok := arg.(starlark.String); ok {
-						paths[i] = string(s)
-						continue
-					}
-
-					return nil, fmt.Errorf(
-						"TypeError: Index %d: expected str, got %T",
-						i,
-						arg,
-					)
-				}
-
-				return FileGroup{Paths: paths}, nil
-			},
-		),
-		"mktarget": starlark.NewBuiltin("mktarget", targets.newTarget),
-		"reftarget": starlark.NewBuiltin(
-			"reftarget",
-			func(
-				t *starlark.Thread,
-				_ *starlark.Builtin,
-				args starlark.Tuple,
-				kwargs []starlark.Tuple,
-			) (starlark.Value, error) {
-				if len(kwargs) > 0 {
-					return nil, fmt.Errorf("Unexpected keyword argument")
-				}
-				if len(args) != 1 {
-					return nil, fmt.Errorf(
-						"Expected 1 unnamed argument; found %d",
-						len(args),
-					)
-				}
-
-				if s, ok := args[0].(starlark.String); ok {
-					return ParseTargetID(
-						ev.Root,
-						filepath.Join(ev.Root, t.Name),
-						string(s),
-					)
-				}
-
-				return nil, fmt.Errorf(
-					"TypeError: Expected str, got %T",
-					args[0],
-				)
-			},
-		),
-	}
-
-	type entry struct {
-		globals starlark.StringDict
-		err     error
-	}
-
-	cache := make(map[string]*entry)
-	var load func(*starlark.Thread, string) (starlark.StringDict, error)
-	load = func(parent *starlark.Thread, mod string) (starlark.StringDict, error) {
+func cacheLoad(
+	cache map[string]*entry,
+	load func(th *starlark.Thread, mod string) (starlark.StringDict, error),
+) func(th *starlark.Thread, mod string) (starlark.StringDict, error) {
+	return func(th *starlark.Thread, mod string) (starlark.StringDict, error) {
 		e, ok := cache[mod]
 		if e == nil {
 			if ok {
@@ -153,28 +40,112 @@ func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 			// Add a placeholder to indicate "load in progress".
 			cache[mod] = nil
 
-			// Load and initialize the module in a new thread.
-			filePath := filepath.Join(ev.Root, mod+".star")
-			data, err := ioutil.ReadFile(filePath)
-			if err != nil {
-				return nil, err
-			}
-			globals, err := starlark.ExecFile(parent, filePath, data, builtins)
+			// Do the load
+			globals, err := load(th, mod)
 			e = &entry{globals, err}
-
-			// Update the cache.
 			cache[mod] = e
 		}
+
 		return e.globals, e.err
 	}
+}
 
-	_, err := starlark.ExecFile(
-		&starlark.Thread{Name: string(p), Load: load},
-		filepath.Join(ev.Root, string(p), "BUILD"),
+func loadLibrary(
+	cache map[string]*entry,
+	libroot string,
+	lib string,
+) (starlark.StringDict, error) {
+	globals, err := starlark.ExecFile(
+		&starlark.Thread{
+			Name: lib,
+			Load: cacheLoad(
+				cache,
+				func(
+					th *starlark.Thread,
+					lib string,
+				) (starlark.StringDict, error) {
+					return loadLibrary(cache, libroot, lib)
+				},
+			),
+		},
+		filepath.Join(libroot, lib[len("lib://"):]+".star"),
 		nil,
-		builtins,
+		starlark.StringDict{
+			"mktarget": starlark.NewBuiltin("mktarget", mktarget),
+		},
 	)
-	return targets.targets, err
+	if err != nil {
+		return nil, errors.Wrapf(err, "Loading %s", lib)
+	}
+
+	return globals, nil
+}
+
+func loadPackage(
+	cache map[string]*entry,
+	libroot string,
+	pkgroot string,
+	pkg string,
+) (starlark.StringDict, error) {
+	return starlark.ExecFile(
+		&starlark.Thread{
+			Name: pkg,
+			Load: cacheLoad(
+				cache,
+				func(
+					th *starlark.Thread,
+					pkg string,
+				) (starlark.StringDict, error) {
+					return load(cache, libroot, pkgroot, pkg)
+				},
+			),
+		},
+		filepath.Join(pkgroot, pkg, "BUILD"),
+		nil,
+		starlark.StringDict{
+			"mktarget": starlark.NewBuiltin("mktarget", mktarget),
+			"glob":     starlark.NewBuiltin("glob", glob),
+		},
+	)
+}
+
+func load(
+	cache cache,
+	libroot string,
+	pkgroot string,
+	mod string,
+) (starlark.StringDict, error) {
+	if strings.HasPrefix(mod, "lib://") {
+		return loadLibrary(cache, libroot, mod)
+	}
+
+	globals, err := loadPackage(cache, libroot, pkgroot, mod)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Loading %s", mod)
+	}
+
+	return globals, nil
+}
+
+func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
+	globals, err := loadPackage(
+		map[string]*entry{},
+		ev.LibRoot,
+		ev.PackageRoot,
+		string(p),
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Loading %s", p)
+	}
+
+	var targets []Target
+	for _, global := range globals {
+		if t, ok := global.(Target); ok {
+			targets = append(targets, t)
+		}
+	}
+
+	return targets, nil
 }
 
 func findKwarg(kwargs []starlark.Tuple, kw string) (starlark.Value, error) {
@@ -186,11 +157,7 @@ func findKwarg(kwargs []starlark.Tuple, kw string) (starlark.Value, error) {
 	return nil, fmt.Errorf("Missing argument: '%s'", kw)
 }
 
-type targets struct {
-	targets []Target
-}
-
-func (ts *targets) newTarget(
+func mktarget(
 	th *starlark.Thread,
 	_ *starlark.Builtin,
 	args starlark.Tuple,
@@ -249,8 +216,7 @@ func (ts *targets) newTarget(
 		)
 	}
 
-	ts.targets = append(ts.targets, t)
-	return t.ID, nil
+	return t, nil
 }
 
 func starlarkValueToInput(tid TargetID, value starlark.Value) (Input, error) {
@@ -258,7 +224,7 @@ func starlarkValueToInput(tid TargetID, value starlark.Value) (Input, error) {
 	case FileGroup:
 		x.Package = tid.Package
 		return x, nil
-	case TargetID:
+	case Target:
 		return x, nil
 	case Input:
 		return x, nil
@@ -320,4 +286,24 @@ func starlarkDictToObject(tid TargetID, d *starlark.Dict) (Object, error) {
 	}
 
 	return out, nil
+}
+
+func glob(
+	th *starlark.Thread,
+	_ *starlark.Builtin,
+	args starlark.Tuple,
+	kwargs []starlark.Tuple,
+) (starlark.Value, error) {
+	if len(kwargs) > 0 {
+		return nil, fmt.Errorf("Unexpected keyword argument")
+	}
+
+	patterns := make([]string, len(args))
+	for i, arg := range args {
+		if s, ok := arg.(starlark.String); ok {
+			patterns[i] = string(s)
+		}
+	}
+
+	return FileGroup{Package: PackageName(th.Name), Patterns: patterns}, nil
 }
