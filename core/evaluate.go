@@ -167,6 +167,10 @@ func mktarget(
 		return nil, fmt.Errorf("target() only takes keyword args")
 	}
 
+	if strings.HasPrefix(th.Name, "lib://") {
+		return nil, fmt.Errorf("mktarget() invoked by library '%s'", th.Name)
+	}
+
 	var t Target
 	t.ID.Package = PackageName(th.Name)
 
