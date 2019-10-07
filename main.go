@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -83,25 +84,8 @@ func graph(dag core.DAG) {
 }
 
 func main() {
-	var command func(core.Cache, core.DAG) error
-	if len(os.Args) > 2 {
-		switch os.Args[1] {
-		case "build":
-			command = build
-		case "rebuild":
-			command = rebuild
-		case "run":
-			command = run
-		case "graph":
-			command = func(_ core.Cache, dag core.DAG) error {
-				graph(dag)
-				return nil
-			}
-		}
-	}
-
-	if command == nil {
-		log.Fatal("USAGE: builder <build|run> <target>")
+	if len(os.Args) < 3 {
+		log.Fatal("USAGE: builder <command> <target>")
 	}
 
 	pwd, err := os.Getwd()
@@ -133,6 +117,28 @@ func main() {
 	}
 	if t == nil {
 		log.Fatalf("Couldn't find target %s", targetID)
+	}
+
+	var command func(core.Cache, core.DAG) error
+	switch os.Args[1] {
+	case "show", "eval":
+		data, err := json.MarshalIndent(t, "", "    ")
+		if err != nil {
+			log.Fatalf("Failed to marshal target %s: %v", targetID, err)
+		}
+		fmt.Printf("%s\n", data)
+		os.Exit(0)
+	case "build":
+		command = build
+	case "rebuild":
+		command = rebuild
+	case "run":
+		command = run
+	case "graph":
+		command = func(_ core.Cache, dag core.DAG) error {
+			graph(dag)
+			return nil
+		}
 	}
 
 	cache := core.LocalCache("/tmp/cache")

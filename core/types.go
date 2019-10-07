@@ -1,7 +1,9 @@
 package core
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash/adler32"
 	"io"
@@ -141,7 +143,44 @@ type Field struct {
 	Value Input
 }
 
+func (f Field) marshalJSON(buf *bytes.Buffer) error {
+	data, err := json.Marshal(f.Key)
+	if err != nil {
+		panic(fmt.Sprintf(
+			"Marshaling types.Object field key '%s': %v",
+			f.Key,
+			err,
+		))
+	}
+	buf.Write(data)
+	buf.WriteByte(':')
+	data, err = json.Marshal(f.Value)
+	if err != nil {
+		return errors.Wrapf(err, "Marshaling field '%s'", f.Key)
+	}
+	buf.Write(data)
+	return nil
+}
+
 type Object []Field
+
+func (o Object) MarshalJSON() ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+	buf.WriteByte('{')
+	if len(o) > 0 {
+		if err := o[0].marshalJSON(buf); err != nil {
+			return nil, err
+		}
+		for _, field := range o[1:] {
+			buf.WriteByte(',')
+			if err := field.marshalJSON(buf); err != nil {
+				return nil, err
+			}
+		}
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
 
 type Array []Input
 
@@ -208,6 +247,20 @@ type Target struct {
 	ID          TargetID
 	Inputs      Object
 	BuilderType BuilderType
+}
+
+func (t Target) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Package string `json:"package"`
+		Name    string `json:"name"`
+		Type    string `json:"type"`
+		Inputs  Object `json:"inputs"`
+	}{
+		Package: string(t.ID.Package),
+		Name:    string(t.ID.Target),
+		Type:    string(t.BuilderType),
+		Inputs:  t.Inputs,
+	})
 }
 
 type FrozenTargetID struct {
