@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
+	"os/exec"
 
 	"github.com/pkg/errors"
 	"github.com/weberc2/builder/core"
@@ -56,7 +54,6 @@ func installWheelPaths(
 	concurrency := 4
 	env := prependPATH(path)
 	errs := make(chan error, concurrency)
-	start := time.Now()
 
 	// Launch `concurrency` workers
 	for i := 0; i < concurrency; i++ {
@@ -93,7 +90,6 @@ func installWheelPaths(
 		if err := <-errs; err != nil {
 			return err
 		}
-		log.Println(time.Since(start), i)
 	}
 
 	return nil
