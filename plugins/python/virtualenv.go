@@ -1,6 +1,7 @@
 package python
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -45,29 +46,27 @@ func virtualEnvParseInputs(
 }
 
 func installWheelPaths(
-	dir string,
+	path string,
 	wheelPaths []string,
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
+	// Run the `pip` in the virtualenv directory (passed in via `path`).
+	// This should be sufficient to run this in the virtualenv, but we're also
+	// updating the PATH environment variable to include the `path` directory
+	// as well.
 	cmd := exec.Command(
-		"pip",
+		filepath.Join(path, "pip"),
 		append(
-			[]string{
-				"install",
-				"--no-deps",
-				"-t",
-				dir,
-			},
+			[]string{"install", "--no-deps"},
 			wheelPaths...,
 		)...,
 	)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", dir))
+	cmd.Env = prependPATH(path)
 	if err := cmd.Run(); err != nil {
-		return errors.Wrap(err, "Installing wheels to temp dir")
+		return errors.Wrap(err, "Installing wheels to temp venv")
 	}
 	return nil
 }
@@ -133,6 +132,84 @@ func virtualEnvBuildScript(
 	return virtualEnvPrepare(dag, cache, stdout, stderr, dependencies)
 }
 
+func prependPATH(value string) []string {
+	environ := os.Environ() // this is a copy, so no worries about mutating!
+	for i, entry := range environ {
+		if strings.HasPrefix(entry, "PATH=") {
+			environ[i] = fmt.Sprintf(
+				"PATH=%s:%s",
+				value,
+				entry[len("PATH="):],
+			)
+			return environ
+		}
+	}
+	// If we never found the PATH env var in the list of env vars, then
+	// create a new one and append it to the list
+	return append(environ, "PATH="+value)
+}
+
+func replaceInFile(filePath, old, new string) error {
+	fi, err := os.Stat(filePath)
+	if err != nil {
+		return err
+	}
+
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(
+		filePath,
+		bytes.ReplaceAll(data, []byte(old), []byte(new)),
+		fi.Mode(),
+	)
+}
+
+// Moves the venv dir `old` to filepath `new`. Since venvs have files that
+// contain their absolute paths, it's imperative to replace those references
+// with references to the new absolute paths. As such, this script does that
+// find and replace before moving the `old` dir to the `new` path, and this
+// operation depends on `old` and `new` being absolute paths (this function
+// does not verify, however). Also, an error can leave the `old` venv in a
+// partially-moved state (references in the old files might be updated to their
+// new paths); however, the new directory will never be created in a bad state.
+func mvvenv(old, new string) error {
+	// This function assumes that all files that _might_ contain references to
+	// the old absolute path are included in this list.
+	files := []string{
+		"bin/easy_install",
+		"bin/easy_install-3.6",
+		"bin/pip",
+		"bin/activate.fish",
+		"bin/activate",
+		"bin/activate.csh",
+	}
+
+	for _, file := range files {
+		if err := replaceInFile(
+			filepath.Join(old, file),
+			old,
+			new,
+		); err != nil {
+			return errors.Wrapf(
+				err,
+				"Replacing '%s' with '%s' in file '%s'",
+				old,
+				new,
+				filepath.Join(old, file),
+			)
+		}
+	}
+
+	if err := os.Rename(old, new); err != nil {
+		return errors.Wrapf(err, "Moving %s to %s", old, new)
+	}
+
+	return nil
+}
+
 func virtualEnvPrepare(
 	dag core.DAG,
 	cache core.Cache,
@@ -146,6 +223,15 @@ func virtualEnvPrepare(
 	}
 	defer os.Remove(tmpDir)
 
+	venvDir := filepath.Join(tmpDir, ".venv")
+	cmd := exec.Command("python", "-m", "venv", venvDir)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		return errors.Wrap(err, "Creating virtualenv")
+	}
+
 	targets, err := gatherTargets(dag.Dependencies, dependencies)
 	if err != nil {
 		return err
@@ -157,7 +243,8 @@ func virtualEnvPrepare(
 	wheelPaths = deduplicate(wheelPaths)
 
 	if err := installWheelPaths(
-		tmpDir,
+		// Make sure `python` is the venv's python and not the system python.
+		filepath.Join(venvDir, "bin"),
 		wheelPaths,
 		stdout,
 		stderr,
@@ -179,10 +266,15 @@ func virtualEnvPrepare(
 		)
 	}
 
-	// Since everything has succeeded, we can move the temporary directory into
+	// Since everything has succeeded, we can move the venv directory into
 	// the cache.
-	if err := os.Rename(tmpDir, outputPath); err != nil {
-		return errors.Wrap(err, "Moving temporary directory to cache")
+	if err := mvvenv(venvDir, outputPath); err != nil {
+		return errors.Wrapf(
+			err,
+			"Moving venv dir from %s to %s",
+			venvDir,
+			outputPath,
+		)
 	}
 
 	return nil

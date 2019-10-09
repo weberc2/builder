@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,16 +100,19 @@ func testRun(
 		}
 		defer outputFile.Close()
 
-		cmd := exec.Command("python", "-m", "pytest")
+		venvBinDir := filepath.Join(cache.Path(test.dependencies), "bin")
+		// Run the `python` from the virtualenv directory. This should be
+		// sufficient to run this in the virtualenv, but we're also updating
+		// the PATH environment variable to include the `venvBinDir` as well.
+		cmd := exec.Command(
+			filepath.Join(venvBinDir, "python"),
+			"-m",
+			"pytest",
+		)
 		cmd.Stdout = io.MultiWriter(stdout, outputFile)
 		cmd.Stderr = stderr
 		cmd.Dir = filepath.Join(cache.Path(test.sources), test.directory)
-		log.Printf("DEBUG PYTHONPATH=%s", cache.Path(test.dependencies))
-		cmd.Env = append(
-			os.Environ(),
-			fmt.Sprintf("PYTHONPATH=%s", cache.Path(test.dependencies)),
-			fmt.Sprintf("VIRTUALENV=%s", cache.Path(test.dependencies)),
-		)
+		cmd.Env = prependPATH(venvBinDir)
 		if err := cmd.Run(); err != nil {
 			return errors.Wrapf(err, "Running pytest")
 		}

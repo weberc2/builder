@@ -128,6 +128,11 @@ func main() {
 		}
 		fmt.Printf("%s\n", data)
 		os.Exit(0)
+	case "cache-path":
+		command = func(cache core.Cache, dag core.DAG) error {
+			fmt.Println(cache.Path(dag.ID.ArtifactID()))
+			return nil
+		}
 	case "build":
 		command = build
 	case "rebuild":
