@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/weberc2/builder/core"
@@ -51,23 +53,49 @@ func installWheelPaths(
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	// Run the `pip` in the virtualenv directory (passed in via `path`).
-	// This should be sufficient to run this in the virtualenv, but we're also
-	// updating the PATH environment variable to include the `path` directory
-	// as well.
-	cmd := exec.Command(
-		filepath.Join(path, "pip"),
-		append(
-			[]string{"install", "--no-deps"},
-			wheelPaths...,
-		)...,
-	)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.Env = prependPATH(path)
-	if err := cmd.Run(); err != nil {
-		return errors.Wrap(err, "Installing wheels to temp venv")
+	concurrency := 4
+	env := prependPATH(path)
+	errs := make(chan error, concurrency)
+	start := time.Now()
+
+	// Launch `concurrency` workers
+	for i := 0; i < concurrency; i++ {
+		step := len(wheelPaths) / concurrency
+		startIndex := i * step
+		stopIndex := startIndex + step
+		if i == concurrency-1 {
+			stopIndex = len(wheelPaths)
+		}
+		go func(a, b int) {
+			if b > len(wheelPaths) {
+				b = len(wheelPaths)
+			}
+
+			// Run the `pip` in the virtualenv directory (passed in via
+			// `path`). This should be sufficient to run this in the
+			// virtualenv, but we're also updating the PATH environment
+			// variable to include the `path` directory as well.
+			cmd := exec.Command(
+				filepath.Join(path, "pip"),
+				append(
+					[]string{"install", "--no-deps"}, wheelPaths[a:b]...,
+				)...,
+			)
+			cmd.Stdout = stdout
+			cmd.Stderr = stderr
+			cmd.Env = env
+			errs <- cmd.Run()
+		}(startIndex, stopIndex)
 	}
+
+	// Await each worker
+	for i := 0; i < concurrency; i++ {
+		if err := <-errs; err != nil {
+			return err
+		}
+		log.Println(time.Since(start), i)
+	}
+
 	return nil
 }
 
