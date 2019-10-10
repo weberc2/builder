@@ -93,7 +93,7 @@ func (c Cache) TempDir(
 	err := withTempDir(func(dir string) error {
 		relpath, id, err := f(dir)
 		if err != nil {
-			if removeErr := os.Remove(dir); removeErr != nil {
+			if removeErr := os.RemoveAll(dir); removeErr != nil {
 				return errors.Wrapf(
 					removeErr,
 					"Removing temporary directory while handling err: %v",
