@@ -3,7 +3,6 @@ package python
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,53 +85,48 @@ func testRun(
 	stderr io.Writer,
 	test test,
 ) error {
-	tmpDir, err := ioutil.TempDir("", "")
-	if err != nil {
-		return errors.Wrap(err, "Creating temp dir")
-	}
-	defer os.Remove(tmpDir)
+	if _, err := cache.TempDir(
+		func(dir string) (string, core.ArtifactID, error) {
+			outputRelPath := "output"
+			outputFilePath := filepath.Join(dir, outputRelPath)
 
-	outputFilePath := filepath.Join(tmpDir, "output")
-	if err := func() error { // closure b/c of defer outputFile.Close() below
-		outputFile, err := os.Create(outputFilePath)
-		if err != nil {
-			return errors.Wrap(err, "Opening output file")
-		}
-		defer outputFile.Close()
+			// closure b/c of defer outputFile.Close() below
+			err := func() error {
+				outputFile, err := os.Create(outputFilePath)
+				if err != nil {
+					return errors.Wrap(err, "Opening output file")
+				}
+				defer outputFile.Close()
 
-		venvBinDir := filepath.Join(cache.Path(test.dependencies), "bin")
-		// Run the `python` from the virtualenv directory. This should be
-		// sufficient to run this in the virtualenv, but we're also updating
-		// the PATH environment variable to include the `venvBinDir` as well.
-		cmd := exec.Command(
-			filepath.Join(venvBinDir, "python"),
-			"-m",
-			"pytest",
-		)
-		cmd.Stdout = io.MultiWriter(stdout, outputFile)
-		cmd.Stderr = stderr
-		cmd.Dir = filepath.Join(cache.Path(test.sources), test.directory)
-		cmd.Env = prependPATH(venvBinDir)
-		if err := cmd.Run(); err != nil {
-			return errors.Wrapf(err, "Running pytest")
-		}
-		return nil
-	}(); err != nil {
-		return err
-	}
-
-	// Now that the tests have succeeded, copy the results into the cache
-	if err := os.MkdirAll(
-		filepath.Dir(cache.Path(dag.ID.ArtifactID())),
-		0755,
+				venvBinDir := filepath.Join(
+					cache.Path(test.dependencies),
+					"bin",
+				)
+				// Run the `python` from the virtualenv directory. This should
+				// be sufficient to run this in the virtualenv, but we're also
+				// updating the PATH environment variable to include the
+				// `venvBinDir` as well.
+				cmd := exec.Command(
+					filepath.Join(venvBinDir, "python"),
+					"-m",
+					"pytest",
+				)
+				cmd.Stdout = io.MultiWriter(stdout, outputFile)
+				cmd.Stderr = stderr
+				cmd.Dir = filepath.Join(
+					cache.Path(test.sources),
+					test.directory,
+				)
+				cmd.Env = prependPATH(venvBinDir)
+				if err := cmd.Run(); err != nil {
+					return errors.Wrapf(err, "Running pytest")
+				}
+				return nil
+			}()
+			return outputRelPath, dag.ID.ArtifactID(), err
+		},
 	); err != nil {
-		return errors.Wrap(err, "Creating parent directory in cache")
-	}
-	if err := os.Rename(
-		outputFilePath,
-		cache.Path(dag.ID.ArtifactID()),
-	); err != nil {
-		return errors.Wrap(err, "Moving test results from temp dir into cache")
+		return errors.Wrap(err, "Running Python tests")
 	}
 	return nil
 }

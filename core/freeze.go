@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -35,85 +34,69 @@ func (f freezer) freezeArray(a Array) ([]DAG, FrozenArray, error) {
 }
 
 func (f *freezer) freezeFileGroup(fg FileGroup) (ArtifactID, error) {
-	tmpDir, err := ioutil.TempDir("", "")
-	if err != nil {
-		return ArtifactID{}, errors.Wrap(err, "Creating temporary directory")
-	}
-	committed := false
-
-	defer func() {
-		if !committed {
-			if err := os.Remove(tmpDir); err != nil {
-				log.Printf("ERROR removing temporary directory %s", tmpDir)
-			}
-		}
-	}()
-
-	checksums := []uint32{ChecksumString(string(fg.Package))}
-	for _, pattern := range fg.Patterns {
-		matches, err := doublestar.Glob(
-			filepath.Join(f.root, string(fg.Package), pattern),
-		)
-		if err != nil {
-			return ArtifactID{}, err
-		}
-
-		for _, match := range matches {
-			data, err := ioutil.ReadFile(match)
-			if err != nil {
-				return ArtifactID{}, err
-			}
-			relpath, err := filepath.Rel(
-				filepath.Join(f.root, string(fg.Package)),
-				match,
+	id, err := f.cache.TempDir(func(dir string) (string, ArtifactID, error) {
+		checksums := []uint32{ChecksumString(string(fg.Package))}
+		for _, pattern := range fg.Patterns {
+			matches, err := doublestar.Glob(
+				filepath.Join(f.root, string(fg.Package), pattern),
 			)
 			if err != nil {
-				return ArtifactID{}, err
+				return "", ArtifactID{}, err
 			}
-			checksums = append(
-				checksums,
-				JoinChecksums(ChecksumString(relpath), ChecksumBytes(data)),
-			)
 
-			if err := func() error {
-				filePath := filepath.Join(tmpDir, relpath)
-				if err := os.MkdirAll(
-					filepath.Dir(filePath),
-					0755,
-				); err != nil {
-					return errors.Wrap(err, "Preparing parent directory")
+			for _, match := range matches {
+				data, err := ioutil.ReadFile(match)
+				if err != nil {
+					return "", ArtifactID{}, err
 				}
-
-				return ioutil.WriteFile(filePath, data, 0644)
-			}(); err != nil {
-				return ArtifactID{}, errors.Wrapf(
-					err,
-					"Writing temp file for file %s in file group for "+
-						"package %s",
-					relpath,
-					fg.Package,
+				relpath, err := filepath.Rel(
+					filepath.Join(f.root, string(fg.Package)),
+					match,
 				)
+				if err != nil {
+					return "", ArtifactID{}, err
+				}
+				checksums = append(
+					checksums,
+					JoinChecksums(
+						ChecksumString(relpath),
+						ChecksumBytes(data),
+					),
+				)
+
+				if err := func() error {
+					filePath := filepath.Join(dir, relpath)
+					if err := os.MkdirAll(
+						filepath.Dir(filePath),
+						0755,
+					); err != nil {
+						return errors.Wrap(err, "Preparing parent directory")
+					}
+
+					return ioutil.WriteFile(filePath, data, 0644)
+				}(); err != nil {
+					return "", ArtifactID{}, errors.Wrapf(
+						err,
+						"Writing temp file for file %s in file group for "+
+							"package %s",
+						relpath,
+						fg.Package,
+					)
+				}
 			}
 		}
+
+		return "", ArtifactID{
+			Package:  fg.Package,
+			Checksum: JoinChecksums(checksums...),
+		}, nil
+	})
+
+	if err != nil {
+		return id, errors.Wrap(err, "Freezing file group")
 	}
 
-	aid := ArtifactID{
-		Package:  fg.Package,
-		Checksum: JoinChecksums(checksums...),
-	}
-
-	if err := os.MkdirAll(filepath.Dir(f.cache.Path(aid)), 0755); err != nil {
-		return ArtifactID{}, errors.Wrapf(err, "Preparing directory in cache")
-	}
-	if err := os.RemoveAll(f.cache.Path(aid)); err != nil {
-		return ArtifactID{}, errors.Wrapf(err, "Removing old cache directory")
-	}
-	if err := os.Rename(tmpDir, f.cache.Path(aid)); err != nil {
-		return ArtifactID{}, errors.Wrap(err, "Committing temp dir to cache")
-	}
-	committed = true
-
-	return aid, nil
+	return id, nil
 }
 
 var ErrTargetNotFound = errors.New("Target not found")

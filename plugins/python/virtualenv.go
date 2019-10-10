@@ -6,9 +6,9 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-	"os/exec"
 
 	"github.com/pkg/errors"
 	"github.com/weberc2/builder/core"
@@ -191,14 +191,14 @@ func replaceInFile(filePath, old, new string) error {
 	)
 }
 
-// Moves the venv dir `old` to filepath `new`. Since venvs have files that
-// contain their absolute paths, it's imperative to replace those references
-// with references to the new absolute paths. As such, this script does that
-// find and replace before moving the `old` dir to the `new` path, and this
-// operation depends on `old` and `new` being absolute paths (this function
-// does not verify, however). Also, an error can leave the `old` venv in a
-// partially-moved state (references in the old files might be updated to their
-// new paths); however, the new directory will never be created in a bad state.
+// Prepares the `old` venv dir to be moved to filepath `new`. Since venvs have
+// files that contain their absolute paths, it's imperative to replace those
+// references with references to the new absolute paths. As such, this script
+// does that find and replace before the `old` dir is moved to the `new` path,
+// and this operation depends on `old` and `new` being absolute paths (this
+// function does not verify, however). Also, an error can leave the `old` venv
+// in a partially-moved state (references in the old files might be updated to
+// their new paths).
 func mvvenv(old, new string) error {
 	// This function assumes that all files that _might_ contain references to
 	// the old absolute path are included in this list.
@@ -227,10 +227,6 @@ func mvvenv(old, new string) error {
 		}
 	}
 
-	if err := os.Rename(old, new); err != nil {
-		return errors.Wrapf(err, "Moving %s to %s", old, new)
-	}
-
 	return nil
 }
 
@@ -241,66 +237,62 @@ func virtualEnvPrepare(
 	stderr io.Writer,
 	dependencies []core.ArtifactID,
 ) error {
-	tmpDir, err := ioutil.TempDir("", "")
-	if err != nil {
-		return errors.Wrap(err, "Creating temp dir")
-	}
-	defer os.Remove(tmpDir)
+	if _, err := cache.TempDir(
+		func(dir string) (string, core.ArtifactID, error) {
+			venvDir := filepath.Join(dir, ".venv")
+			cmd := exec.Command("python", "-m", "venv", venvDir)
+			cmd.Stdout = stdout
+			cmd.Stderr = stderr
+			cmd.Dir = dir
+			if err := cmd.Run(); err != nil {
+				return "", core.ArtifactID{}, errors.Wrap(
+					err,
+					"Creating virtualenv",
+				)
+			}
+			targets, err := gatherTargets(dag.Dependencies, dependencies)
+			if err != nil {
+				return "", core.ArtifactID{}, err
+			}
+			wheelPaths, err := gatherWheelPaths(cache, targets)
+			if err != nil {
+				return "", core.ArtifactID{}, err
+			}
+			wheelPaths = deduplicate(wheelPaths)
 
-	venvDir := filepath.Join(tmpDir, ".venv")
-	cmd := exec.Command("python", "-m", "venv", venvDir)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		return errors.Wrap(err, "Creating virtualenv")
-	}
+			if err := installWheelPaths(
+				// Make sure `python` is the venv's python and not the system
+				// python.
+				filepath.Join(venvDir, "bin"),
+				wheelPaths,
+				stdout,
+				stderr,
+			); err != nil {
+				return "", core.ArtifactID{}, errors.Wrapf(
+					err,
+					"Installing wheels [%s] into directory %s",
+					strings.Join(wheelPaths, ", "),
+					dir,
+				)
+			}
 
-	targets, err := gatherTargets(dag.Dependencies, dependencies)
-	if err != nil {
-		return err
-	}
-	wheelPaths, err := gatherWheelPaths(cache, targets)
-	if err != nil {
-		return err
-	}
-	wheelPaths = deduplicate(wheelPaths)
+			// Since everything has succeeded, we can move the venv directory
+			// into the cache.
+			outputPath := cache.Path(dag.ID.ArtifactID())
+			if err := mvvenv(venvDir, outputPath); err != nil {
+				return "", core.ArtifactID{}, errors.Wrapf(
+					err,
+					"Moving venv dir from %s to %s",
+					venvDir,
+					outputPath,
+				)
+			}
 
-	if err := installWheelPaths(
-		// Make sure `python` is the venv's python and not the system python.
-		filepath.Join(venvDir, "bin"),
-		wheelPaths,
-		stdout,
-		stderr,
+			return ".venv", dag.ID.ArtifactID(), nil
+		},
 	); err != nil {
-		return errors.Wrapf(
-			err,
-			"Installing wheels [%s] into directory %s",
-			strings.Join(wheelPaths, ", "),
-			tmpDir,
-		)
+		return errors.Wrap(err, "Preparing virtualenv")
 	}
-
-	outputPath := cache.Path(dag.ID.ArtifactID())
-	parentDir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(parentDir, 0755); err != nil {
-		return errors.Wrap(
-			err,
-			"Making parent directory for output file in cache",
-		)
-	}
-
-	// Since everything has succeeded, we can move the venv directory into
-	// the cache.
-	if err := mvvenv(venvDir, outputPath); err != nil {
-		return errors.Wrapf(
-			err,
-			"Moving venv dir from %s to %s",
-			venvDir,
-			outputPath,
-		)
-	}
-
 	return nil
 }
 

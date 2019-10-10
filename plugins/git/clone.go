@@ -2,9 +2,6 @@ package git
 
 import (
 	"io"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 
 	"github.com/pkg/errors"
 	"github.com/weberc2/builder/core"
@@ -28,40 +25,40 @@ func gitCloneBuildScript(
 		return err
 	}
 
-	tmpDir, err := ioutil.TempDir("", "")
-	if err != nil {
-		return errors.Wrap(err, "Creating temp dir for git clone")
-	}
-	defer os.RemoveAll(tmpDir)
+	if _, err := cache.TempDir(
+		func(tmpDir string) (string, core.ArtifactID, error) {
+			r, err := git.PlainClone(
+				tmpDir,
+				false,
+				&git.CloneOptions{URL: string(repo)},
+			)
+			if err != nil {
+				return "", core.ArtifactID{}, errors.Wrap(err, "Cloning repo")
+			}
 
-	r, err := git.PlainClone(
-		tmpDir,
-		false,
-		&git.CloneOptions{URL: string(repo)},
-	)
-	if err != nil {
-		return errors.Wrap(err, "Cloning repo")
-	}
+			worktree, err := r.Worktree()
+			if err != nil {
+				return "", core.ArtifactID{}, errors.Wrap(
+					err,
+					"Getting worktree",
+				)
+			}
 
-	worktree, err := r.Worktree()
-	if err != nil {
-		return errors.Wrap(err, "Getting worktree")
-	}
+			if err := worktree.Checkout(&git.CheckoutOptions{
+				Hash:  plumbing.NewHash(string(sha)),
+				Force: true,
+			}); err != nil {
+				return "", core.ArtifactID{}, errors.Wrapf(
+					err,
+					"Checking out sha %s",
+					sha,
+				)
+			}
 
-	if err := worktree.Checkout(&git.CheckoutOptions{
-		Hash:  plumbing.NewHash(string(sha)),
-		Force: true,
-	}); err != nil {
-		return errors.Wrapf(err, "Checking out sha %s", sha)
-	}
-
-	finalCachePath := cache.Path(dag.ID.ArtifactID())
-	if err := os.MkdirAll(filepath.Dir(finalCachePath), 0755); err != nil {
-		return errors.Wrap(err, "Creating parent directory in cache")
-	}
-
-	if err := os.Rename(tmpDir, finalCachePath); err != nil {
-		return errors.Wrap(err, "Moving tmp dir to final cache location")
+			return "", dag.ID.ArtifactID(), nil
+		},
+	); err != nil {
+		return errors.Wrap(err, "Cloning git repo")
 	}
 
 	return nil

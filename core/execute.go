@@ -22,7 +22,10 @@ func LocalExecutor(plugins []Plugin, cache Cache, rebuild bool) ExecuteFunc {
 						dag.ID.ArtifactID(),
 					); err != ErrArtifactNotFound {
 						if err == nil {
-							color.Green("Found artifact %s", dag.ID.ArtifactID())
+							color.Green(
+								"Found artifact %s",
+								dag.ID.ArtifactID(),
+							)
 						}
 						return err
 					}
