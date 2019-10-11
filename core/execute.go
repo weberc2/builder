@@ -74,10 +74,23 @@ func LocalExecutor(plugins []Plugin, cache Cache, rebuild bool) ExecuteFunc {
 }
 
 func Build(execute ExecuteFunc, dag DAG) error {
+	return build(execute, dag, map[FrozenTargetID]struct{}{})
+}
+
+func build(
+	execute ExecuteFunc,
+	dag DAG,
+	seen map[FrozenTargetID]struct{},
+) error {
 	for _, dependency := range dag.Dependencies {
-		if err := Build(execute, dependency); err != nil {
+		if _, found := seen[dependency.ID]; found {
+			continue
+		}
+
+		if err := build(execute, dependency, seen); err != nil {
 			return err
 		}
+		seen[dependency.ID] = struct{}{}
 	}
 
 	return execute(dag)
