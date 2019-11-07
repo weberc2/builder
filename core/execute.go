@@ -13,22 +13,20 @@ var ErrPluginNotFound = errors.New("Plugin not found")
 
 type ExecuteFunc func(dag DAG) error
 
-func LocalExecutor(plugins []Plugin, cache Cache, rebuild bool) ExecuteFunc {
+func LocalExecutor(plugins []Plugin, cache Cache) ExecuteFunc {
 	return func(dag DAG) error {
 		for _, plugin := range plugins {
 			if plugin.Type == dag.BuilderType {
-				if !rebuild {
-					if err := cache.Exists(
-						dag.ID.ArtifactID(),
-					); err != ErrArtifactNotFound {
-						if err == nil {
-							color.Green(
-								"Found artifact %s",
-								dag.ID.ArtifactID(),
-							)
-						}
-						return err
+				if err := cache.Exists(
+					dag.ID.ArtifactID(),
+				); err != ErrArtifactNotFound {
+					if err == nil {
+						color.Green(
+							"Found artifact %s",
+							dag.ID.ArtifactID(),
+						)
 					}
+					return err
 				}
 				color.Yellow("Building %s", dag.ID.ArtifactID())
 

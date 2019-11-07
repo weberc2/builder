@@ -11,12 +11,18 @@ import (
 )
 
 func FreezeTarget(root string, cache Cache, target Target) (DAG, error) {
-	return freezer.freezeTarget(freezer{root: root, cache: cache}, target)
+	return freezer.freezeTarget(
+		freezer{root: root, cache: cache, seen: map[TargetID]DAG{}},
+		target,
+	)
 }
 
 type freezer struct {
 	root  string
 	cache Cache
+
+	// An in-memory cache to make sure we don't redundantly freeze targets.
+	seen map[TargetID]DAG
 }
 
 func (f freezer) freezeArray(a Array) ([]DAG, FrozenArray, error) {
@@ -151,12 +157,16 @@ func (f *freezer) freezeObject(o Object) ([]DAG, FrozenObject, error) {
 }
 
 func (f freezer) freezeTarget(t Target) (DAG, error) {
+	if dag, found := f.seen[t.ID]; found {
+		return dag, nil
+	}
+
 	deps, frozenInputs, err := f.freezeObject(t.Inputs)
 	if err != nil {
 		return DAG{}, err
 	}
 
-	return DAG{
+	dag := DAG{
 		FrozenTarget: FrozenTarget{
 			ID: FrozenTargetID{
 				Package: t.ID.Package,
@@ -173,5 +183,7 @@ func (f freezer) freezeTarget(t Target) (DAG, error) {
 			BuilderType: t.BuilderType,
 		},
 		Dependencies: deps,
-	}, nil
+	}
+	f.seen[t.ID] = dag
+	return dag, nil
 }

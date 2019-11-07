@@ -46,10 +46,15 @@ astrolabe = pypi(name = "astrolabe")
 multidict = pypi(name = "multidict")
 yarl = pypi(name = "yarl", dependencies = [idna])
 idna_ssl = pypi(name = "idna-ssl")
-typing_extensions = pypi(name = "typing_extensions")
+typing_extensions = pypi(
+    name = "typing_extensions",
+    # >=3.7.4 - black==19.10.b0
+    constraint = ">=3.7.4",
+)
 aiohttp = pypi(
     name = "aiohttp",
-    constraint = "==3.4.4",
+    # >=3.3.2 - black==19.10.b0
+    constraint = "==3.4.4", # Not sure where this 3.4.4 came from
     dependencies = [
         attrs,
         chardet,
@@ -174,6 +179,69 @@ auth0 = pypi(
 jwt = pypi(name = "jwt", package_name = "PyJWT")
 freezegun = pypi(name = "freezegun", dependencies = [six, python_dateutil])
 appdirs = pypi(name = "appdirs")
-click = pypi(name = "click")
-toml = pypi(name = "toml")
-black = pypi(name = "black", dependencies = [ appdirs, attrs, click, toml ])
+click = pypi(
+    name = "click",
+    # >=6.5 - black==19.10.b0
+    constraint = ">=6.5",
+)
+toml = pypi(
+    name = "toml",
+    # >=0.9.4 - black==19.10.b0
+    constraint = ">=0.9.4",
+)
+regex = pypi(
+    name = "regex",
+    # >=2019.8 - black==19.10.b0
+    constraint = ">=2019.8",
+)
+typed_ast = pypi(
+    name = "typed_ast",
+    # ==1.4.0 - black==19.10.b0
+    constraint = "==1.4.0",
+)
+aiohttp_cors = pypi(name = "aiohttp-cors")
+dataclasses = pypi(
+    name = "dataclasses",
+    # >=0.6 - black==19.10.b0
+    constraint = ">=0.6",
+)
+pathspec = pypi(
+    name = "pathspec",
+    # >=0.6 - black==19.10.b0
+    constraint = ">=0.6",
+)
+mypy_extensions = pypi(
+    name = "mypy_extensions",
+    # >=0.4.3 - black==19.10.b0
+    constraint = ">=0.4.3",
+)
+
+# https://github.com/psf/black/blob/19.10.b0/Pipfile
+# aiohttp = ">=3.3.2"
+# attrs = ">=18.1.0"
+# click = ">=6.5"
+# appdirs = "*"
+# toml = ">=0.9.4"
+# black = {path = ".",extras = ["d"],editable = true}
+# aiohttp-cors = "*"
+# typed-ast = "==1.4.0"
+# regex = ">=2019.8"
+# pathspec = ">=0.6"
+black = pypi(
+    name = "black",
+    constraint = "==19.10.b0", # latest version as of 2019-11-06
+    dependencies = [
+        aiohttp,
+        aiohttp_cors,
+        appdirs,
+        attrs,
+        click,
+        dataclasses,
+        mypy_extensions,
+        regex,
+        pathspec,
+        toml,
+        typed_ast,
+        typing_extensions,
+    ],
+)

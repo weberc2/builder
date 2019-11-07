@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -33,14 +34,6 @@ func findRoot(start string) (string, error) {
 }
 
 func build(cache core.Cache, dag core.DAG) error {
-	return _build(cache, dag, false)
-}
-
-func rebuild(cache core.Cache, dag core.DAG) error {
-	return _build(cache, dag, true)
-}
-
-func _build(cache core.Cache, dag core.DAG, rebuild bool) error {
 	return core.Build(
 		core.LocalExecutor(
 			[]core.Plugin{
@@ -52,9 +45,27 @@ func _build(cache core.Cache, dag core.DAG, rebuild bool) error {
 				python.PypiLibrary,
 				python.Test,
 				python.VirtualEnv,
+
+				// Create a noop plugin. This is useful for meta-packages.
+				core.Plugin{
+					Type: core.BuilderType("noop"),
+					BuildScript: func(
+						dag core.DAG,
+						cache core.Cache,
+						stdout io.Writer,
+						stderr io.Writer,
+					) error {
+						return cache.Write(
+							dag.ID.ArtifactID(),
+							func(w io.Writer) error {
+								_, err := w.Write([]byte("noop"))
+								return err
+							},
+						)
+					},
+				},
 			},
 			cache,
-			rebuild,
 		),
 		dag,
 	)
@@ -128,15 +139,13 @@ func main() {
 		}
 		fmt.Printf("%s\n", data)
 		os.Exit(0)
-	case "cache-path":
+	case "cache-path", "path":
 		command = func(cache core.Cache, dag core.DAG) error {
 			fmt.Println(cache.Path(dag.ID.ArtifactID()))
 			return nil
 		}
 	case "build":
 		command = build
-	case "rebuild":
-		command = rebuild
 	case "run":
 		command = run
 	case "graph":
@@ -144,6 +153,8 @@ func main() {
 			graph(dag)
 			return nil
 		}
+	default:
+		log.Fatalf("Invalid command: %s", os.Args[1])
 	}
 
 	cache := core.LocalCache("/tmp/cache")

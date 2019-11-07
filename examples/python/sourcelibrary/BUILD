@@ -1,7 +1,7 @@
 load("lib://py", "py_source_library")
 
-sourcelibrary = py_source_library(
-    name = "sourcelibrary",
+lib = py_source_library(
+    name = "lib",
     package_name = "sourcelibrary",
     sources = glob(
         "setup.py",

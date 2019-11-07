@@ -57,25 +57,6 @@ def py_pypi_library(
         type = "py_pypi_library",
     )
 
-def py_test(name, sources, pytest, directory = None, dependencies = None):
-    if directory == None:
-        directory = ""
-    if dependencies == None:
-        dependencies = []
-    dependencies.append(pytest)
-    return mktarget(
-        name = name,
-        args = {
-            "sources": sources,
-            "directory": directory,
-            "dependencies": py_virtualenv(
-                name = "{}_dependencies".format(name),
-                dependencies = dependencies,
-            ),
-        },
-        type = "py_test",
-    )
-
 def py_virtualenv(name, dependencies):
     return mktarget(
         name = name,

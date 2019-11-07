@@ -3,6 +3,8 @@ package python
 import (
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"os/exec"
 
 	"github.com/pkg/errors"
@@ -33,6 +35,18 @@ func pypiLibraryInstall(
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
+		if err := os.RemoveAll(cache.Path(output)); err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf(
+					"ERROR: Failed to delete directory '%s' from cache. "+
+						"This will give the appearance that the artifact was"+
+						"created when in fact it was not. Please make sure "+
+						"this is deleted before proceeding.",
+					cache.Path(output),
+				)
+			}
+			// If the error is "directory doesn't exist", then that's fine too
+		}
 		return errors.Wrap(err, "Installing pypi library")
 	}
 	return nil
