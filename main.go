@@ -33,42 +33,38 @@ func findRoot(start string) (string, error) {
 	return findRoot(filepath.Dir(start))
 }
 
-func build(cache core.Cache, dag core.DAG) error {
-	return core.Build(
-		core.LocalExecutor(
-			[]core.Plugin{
-				git.Clone,
-				golang.Library,
-				golang.Binary,
-				python.SourceBinary,
-				python.SourceLibrary,
-				python.PypiLibrary,
-				python.Test,
-				python.VirtualEnv,
+var plugins = []core.Plugin{
+	git.Clone,
+	golang.Library,
+	golang.Binary,
+	python.SourceBinary,
+	python.SourceLibrary,
+	python.PypiLibrary,
+	python.Test,
+	python.VirtualEnv,
 
-				// Create a noop plugin. This is useful for meta-packages.
-				core.Plugin{
-					Type: core.BuilderType("noop"),
-					BuildScript: func(
-						dag core.DAG,
-						cache core.Cache,
-						stdout io.Writer,
-						stderr io.Writer,
-					) error {
-						return cache.Write(
-							dag.ID.ArtifactID(),
-							func(w io.Writer) error {
-								_, err := w.Write([]byte("noop"))
-								return err
-							},
-						)
-					},
+	// Create a noop plugin. This is useful for meta-packages.
+	core.Plugin{
+		Type: core.BuilderType("noop"),
+		BuildScript: func(
+			dag core.DAG,
+			cache core.Cache,
+			stdout io.Writer,
+			stderr io.Writer,
+		) error {
+			return cache.Write(
+				dag.ID.ArtifactID(),
+				func(w io.Writer) error {
+					_, err := w.Write([]byte("noop"))
+					return err
 				},
-			},
-			cache,
-		),
-		dag,
-	)
+			)
+		},
+	},
+}
+
+func build(cache core.Cache, dag core.DAG) error {
+	return core.Build(core.LocalExecutor(plugins, cache), dag)
 }
 
 func run(cache core.Cache, dag core.DAG) error {
@@ -115,7 +111,9 @@ func main() {
 
 	var t *core.Target
 	targets, err := core.Evaluator{
-		LibRoot:     filepath.Join(root, "plugins"),
+		BuiltinModules: map[string]string{
+			"std/python": python.BuiltinModule,
+		},
 		PackageRoot: root,
 	}.Evaluate(targetID.Package)
 	if err != nil {

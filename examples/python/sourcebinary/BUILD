@@ -1,4 +1,4 @@
-load("lib://py", "py_source_binary")
+load("std/python", "py_source_binary")
 load("examples/python/sourcelibrary", sourcelibrary = "lib")
 load("3rdParty/python", "requests")
 

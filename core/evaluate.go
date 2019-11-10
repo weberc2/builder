@@ -14,8 +14,9 @@ type Evaluator struct {
 	// PackageRoot is the directory that contains all packages.
 	PackageRoot string
 
-	// LibRoot is the directory that contains all libraries.
-	LibRoot string
+	// BuiltinModules is a list of modules that are baked into the application
+	// process.
+	BuiltinModules map[string]string
 }
 
 type entry struct {
@@ -50,40 +51,46 @@ func cacheLoad(
 	}
 }
 
-func loadLibrary(
-	cache map[string]*entry,
-	libroot string,
-	lib string,
-) (starlark.StringDict, error) {
-	globals, err := starlark.ExecFile(
-		&starlark.Thread{
-			Name: lib,
-			Load: cacheLoad(
-				cache,
-				func(
-					th *starlark.Thread,
-					lib string,
-				) (starlark.StringDict, error) {
-					return loadLibrary(cache, libroot, lib)
-				},
-			),
-		},
-		filepath.Join(libroot, lib[len("lib://"):]+".star"),
-		nil,
-		starlark.StringDict{
-			"mktarget": starlark.NewBuiltin("mktarget", mktarget),
-		},
-	)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Loading %s", lib)
-	}
+var ErrUnknownBuiltinModule = errors.Errorf("Unknown builtin module")
 
-	return globals, nil
+type UnknownBuiltinModuleErr string
+
+func (err UnknownBuiltinModuleErr) Error() string {
+	return fmt.Sprintf("Unknown builtin module: %s", string(err))
+}
+
+func loadBuiltin(
+	cache map[string]*entry,
+	builtinModules map[string]string,
+	builtin string,
+) (starlark.StringDict, error) {
+	if script, found := builtinModules[builtin]; found {
+		return starlark.ExecFile(
+			&starlark.Thread{
+				Name: builtin,
+				Load: cacheLoad(
+					cache,
+					func(
+						th *starlark.Thread,
+						lib string,
+					) (starlark.StringDict, error) {
+						return loadBuiltin(cache, builtinModules, lib)
+					},
+				),
+			},
+			"builtin://"+builtin,
+			script,
+			starlark.StringDict{
+				"mktarget": starlark.NewBuiltin("mktarget", mktarget),
+			},
+		)
+	}
+	return nil, UnknownBuiltinModuleErr(builtin)
 }
 
 func loadPackage(
 	cache map[string]*entry,
-	libroot string,
+	builtinModules map[string]string,
 	pkgroot string,
 	pkg string,
 ) (starlark.StringDict, error) {
@@ -96,7 +103,7 @@ func loadPackage(
 					th *starlark.Thread,
 					pkg string,
 				) (starlark.StringDict, error) {
-					return load(cache, libroot, pkgroot, pkg)
+					return load(cache, builtinModules, pkgroot, pkg)
 				},
 			),
 		},
@@ -111,15 +118,14 @@ func loadPackage(
 
 func load(
 	cache cache,
-	libroot string,
+	builtinModules map[string]string,
 	pkgroot string,
 	mod string,
 ) (starlark.StringDict, error) {
-	if strings.HasPrefix(mod, "lib://") {
-		return loadLibrary(cache, libroot, mod)
+	globals, err := loadBuiltin(cache, builtinModules, mod)
+	if _, ok := err.(UnknownBuiltinModuleErr); ok {
+		globals, err = loadPackage(cache, builtinModules, pkgroot, mod)
 	}
-
-	globals, err := loadPackage(cache, libroot, pkgroot, mod)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Loading %s", mod)
 	}
@@ -130,7 +136,7 @@ func load(
 func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
 	globals, err := loadPackage(
 		map[string]*entry{},
-		ev.LibRoot,
+		ev.BuiltinModules,
 		ev.PackageRoot,
 		string(p),
 	)
@@ -165,10 +171,6 @@ func mktarget(
 ) (starlark.Value, error) {
 	if len(args) > 0 {
 		return nil, fmt.Errorf("target() only takes keyword args")
-	}
-
-	if strings.HasPrefix(th.Name, "lib://") {
-		return nil, fmt.Errorf("mktarget() invoked by library '%s'", th.Name)
 	}
 
 	var t Target

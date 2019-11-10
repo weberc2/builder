@@ -1,4 +1,4 @@
-load("lib://py", "py_source_library")
+load("std/python", "py_source_library")
 
 lib = py_source_library(
     name = "lib",

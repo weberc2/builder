@@ -1,4 +1,4 @@
-load("lib://py", pypi="py_pypi_library")
+load("std/python", "pypi")
 
 atomicwrites = pypi(name = "atomicwrites")
 six = pypi(name = "six")

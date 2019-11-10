@@ -149,9 +149,9 @@ func buildWheel(
 const (
 	BuilderTypeSourceBinary  core.BuilderType = "py_source_binary"
 	BuilderTypeSourceLibrary core.BuilderType = "py_source_library"
-	BuilderTypePypiLibrary   core.BuilderType = "py_pypi_library"
-	BuilderTypeTest          core.BuilderType = "py_test"
-	BuilderTypeVirtualEnv    core.BuilderType = "py_virtualenv"
+	BuilderTypePypiLibrary   core.BuilderType = "pypi"
+	BuilderTypeTest          core.BuilderType = "pytest"
+	BuilderTypeVirtualEnv    core.BuilderType = "virtualenv"
 )
 
 func isValidDependencyType(dependencyType core.BuilderType) bool {
