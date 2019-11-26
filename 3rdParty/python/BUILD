@@ -118,9 +118,16 @@ jsonpatch = pypi(name = "jsonpatch", dependencies = [jsonpointer])
 pyrsistent = pypi(name = "pyrsistent")
 jsonschema = pypi(name = "jsonschema", dependencies = [attrs, pyrsistent])
 setuptools = pypi(name = "setuptools")
+importlib_resources = pypi(name = "importlib_resources")
 cfn_lint = pypi(
     name = "cfn-lint",
-    dependencies = [aws_sam_translator, jsonpatch, jsonschema, setuptools],
+    dependencies = [
+        aws_sam_translator,
+        jsonpatch,
+        jsonschema,
+        setuptools,
+        importlib_resources,
+    ],
 )
 sshpubkeys = pypi(name = "sshpubkeys")
 moto = pypi(
