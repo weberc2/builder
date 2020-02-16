@@ -19,6 +19,35 @@ type sourceBinary struct {
 	sources      core.ArtifactID
 }
 
+func (sb *sourceBinary) parseInputs(inputs core.FrozenObject) error {
+	return errors.Wrap(
+		inputs.VisitKeys(
+			core.KeySpec{
+				Key:   "package_name",
+				Value: core.ParseString(&sb.packageName),
+			},
+			core.KeySpec{
+				Key:   "entry_point",
+				Value: core.ParseString(&sb.entryPoint),
+			},
+			core.KeySpec{
+				Key: "dependencies",
+				Value: core.AssertArrayOf(core.AssertArtifactID(
+					func(dep core.ArtifactID) error {
+						sb.dependencies = append(sb.dependencies, dep)
+						return nil
+					},
+				)),
+			},
+			core.KeySpec{
+				Key:   "sources",
+				Value: core.ParseArtifactID(&sb.sources),
+			},
+		),
+		"Parsing py_source_binary inputs",
+	)
+}
+
 func sourceBinaryInstall(
 	dag core.DAG,
 	cache core.Cache,
@@ -91,88 +120,14 @@ DEPENDENCIES:
 	return nil
 }
 
-func sourceBinaryParseInputs(
-	inputs core.FrozenObject,
-) (sourceBinary, error) {
-	packageNameValue, err := inputs.Get("package_name")
-	if err != nil {
-		return sourceBinary{}, err
-	}
-	packageName, ok := packageNameValue.(core.String)
-	if !ok {
-		return sourceBinary{}, fmt.Errorf(
-			"TypeError: package_name argument must be string; got %T",
-			packageNameValue,
-		)
-	}
-
-	dependenciesValue, err := inputs.Get("dependencies")
-	if err != nil {
-		return sourceBinary{}, fmt.Errorf(
-			"Missing required argument 'dependencies'",
-		)
-	}
-	dependenciesArray, ok := dependenciesValue.(core.FrozenArray)
-	if !ok {
-		return sourceBinary{}, fmt.Errorf(
-			"'dependencies' argument must be a list",
-		)
-	}
-	dependencies := make([]core.ArtifactID, len(dependenciesArray))
-	for i, dependencyValue := range dependenciesArray {
-		if dependency, ok := dependencyValue.(core.ArtifactID); ok {
-			dependencies[i] = dependency
-			continue
-		}
-		return sourceBinary{}, fmt.Errorf(
-			"'dependencies' elements must be artifact IDs; found %T at index %d",
-			dependencyValue,
-			i,
-		)
-	}
-
-	sourcesValue, err := inputs.Get("sources")
-	if err != nil {
-		return sourceBinary{}, fmt.Errorf(
-			"Missing required argument 'sources'",
-		)
-	}
-	sources, ok := sourcesValue.(core.ArtifactID)
-	if !ok {
-		return sourceBinary{}, fmt.Errorf(
-			"'sources' argument must be a filegroup; got %T",
-			sourcesValue,
-		)
-	}
-
-	entryPointValue, err := inputs.Get("entry_point")
-	if err != nil {
-		return sourceBinary{}, err
-	}
-	entryPoint, ok := entryPointValue.(core.String)
-	if !ok {
-		return sourceBinary{}, fmt.Errorf(
-			"TypeError: entry_point argument must be string; got %T",
-			entryPointValue,
-		)
-	}
-
-	return sourceBinary{
-		packageName:  string(packageName),
-		dependencies: dependencies,
-		sources:      sources,
-		entryPoint:   string(entryPoint),
-	}, nil
-}
-
 func sourceBinaryBuildScript(
 	dag core.DAG,
 	cache core.Cache,
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	bin, err := sourceBinaryParseInputs(dag.Inputs)
-	if err != nil {
+	var bin sourceBinary
+	if err := bin.parseInputs(dag.Inputs); err != nil {
 		return err
 	}
 	return sourceBinaryInstall(dag, cache, stdout, stderr, bin)

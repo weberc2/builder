@@ -1,7 +1,6 @@
 package python
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -11,71 +10,45 @@ import (
 	"github.com/weberc2/builder/core"
 )
 
-type test struct {
-	directory    string
-	dependencies core.ArtifactID
-	sources      core.ArtifactID
-}
-
-func testParseInputs(inputs core.FrozenObject) (test, error) {
-	directoryValue, err := inputs.Get("directory")
-	if err != nil {
-		return test{}, fmt.Errorf(
-			"Missing required argument 'directory'",
-		)
-	}
-	directory, ok := directoryValue.(core.String)
-	if !ok {
-		return test{}, fmt.Errorf(
-			"TypeError: 'directory' argument must be a str",
-		)
-	}
-
-	dependenciesValue, err := inputs.Get("dependencies")
-	if err != nil {
-		return test{}, fmt.Errorf(
-			"Missing required argument 'dependencies'",
-		)
-	}
-	dependencies, ok := dependenciesValue.(core.ArtifactID)
-	if !ok {
-		return test{}, fmt.Errorf(
-			"'dependencies' argument must be a py_virtualenv target",
-		)
-	}
-
-	sourcesValue, err := inputs.Get("sources")
-	if err != nil {
-		return test{}, fmt.Errorf(
-			"Missing required argument 'sources'",
-		)
-	}
-	sources, ok := sourcesValue.(core.ArtifactID)
-	if !ok {
-		return test{}, fmt.Errorf(
-			"'sources' argument must be a filegroup; got %T",
-			sourcesValue,
-		)
-	}
-
-	return test{
-		directory:    string(directory),
-		dependencies: dependencies,
-		sources:      sources,
-	}, nil
-}
-
 func testBuildScript(
 	dag core.DAG,
 	cache core.Cache,
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	test, err := testParseInputs(dag.Inputs)
-	if err != nil {
-		return err
+	var directory string
+	var dependencies core.ArtifactID
+	var sources core.ArtifactID
+	if err := dag.Inputs.VisitKeys(
+		core.KeySpec{
+			Key:   "directory",
+			Value: core.ParseString(&directory),
+		},
+		core.KeySpec{
+			Key: "dependencies",
+			Value: core.AssertArtifactID(
+				func(virtualenv core.ArtifactID) error {
+					dependencies = virtualenv
+					return nil
+				},
+			),
+		},
+		core.KeySpec{
+			Key:   "sources",
+			Value: core.ParseArtifactID(&sources),
+		},
+	); err != nil {
+		return errors.Wrap(err, "Parsing py_test inputs")
 	}
-	return testRun(dag, cache, stdout, stderr, test)
+	return testRun(
+		dag,
+		cache,
+		stdout,
+		stderr,
+		directory,
+		dependencies,
+		sources,
+	)
 }
 
 func testRun(
@@ -83,7 +56,9 @@ func testRun(
 	cache core.Cache,
 	stdout io.Writer,
 	stderr io.Writer,
-	test test,
+	directory string,
+	dependencies core.ArtifactID,
+	sources core.ArtifactID,
 ) error {
 	if _, err := cache.TempDir(
 		func(dir string) (string, core.ArtifactID, error) {
@@ -99,7 +74,7 @@ func testRun(
 				defer outputFile.Close()
 
 				venvBinDir := filepath.Join(
-					cache.Path(test.dependencies),
+					cache.Path(dependencies),
 					"bin",
 				)
 				// Run the `python` from the virtualenv directory. This should
@@ -114,8 +89,8 @@ func testRun(
 				cmd.Stdout = io.MultiWriter(stdout, outputFile)
 				cmd.Stderr = stderr
 				cmd.Dir = filepath.Join(
-					cache.Path(test.sources),
-					test.directory,
+					cache.Path(sources),
+					directory,
 				)
 				cmd.Env = prependPATH(venvBinDir)
 				if err := cmd.Run(); err != nil {

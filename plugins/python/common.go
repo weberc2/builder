@@ -25,45 +25,31 @@ func fetchWheelPaths(cache core.Cache, dag core.DAG) ([]string, error) {
 		)
 	}
 
-	dependenciesInput, err := dag.Inputs.Get("dependencies")
-	if err != nil {
-		panic(errors.Wrapf(
-			err,
-			"Trying to get input 'dependencies' on target %s (type %s)",
-			dag.ID,
-			dag.BuilderType,
-		))
-	}
-
-	dependenciesArray, ok := dependenciesInput.(core.FrozenArray)
-	if !ok {
-		return nil, errors.Errorf(
-			"Target %s: expected 'dependencies' input to be an array; got %T",
-			dag.ID,
-			dependenciesInput,
-		)
+	var dependencies []core.ArtifactID
+	if err := dag.Inputs.VisitKey(
+		"dependencies",
+		core.AssertArrayOf(core.AssertArtifactID(
+			func(dep core.ArtifactID) error {
+				dependencies = append(dependencies, dep)
+				return nil
+			},
+		)),
+	); err != nil {
+		return nil, err
 	}
 
 	var wheelPaths []string
 DEPENDENCIES:
-	for _, elt := range dependenciesArray {
-		dependencyID, ok := elt.(core.ArtifactID)
-		if !ok {
-			return nil, errors.Errorf(
-				"Target %s: expected dependency to be an artifact ID, got %T",
-				dag.ID,
-				elt,
-			)
-		}
+	for _, dep := range dependencies {
 
 		for _, dependency := range dag.Dependencies {
-			if dependency.ID.ArtifactID() == dependencyID {
+			if dependency.ID.ArtifactID() == dep {
 				transitiveWheelPaths, err := fetchWheelPaths(cache, dependency)
 				if err != nil {
 					return nil, errors.Wrapf(
 						err,
 						"Fetching dirs for dependency %s of target %s",
-						dependencyID,
+						dep,
 						dag.ID,
 					)
 				}
@@ -76,7 +62,7 @@ DEPENDENCIES:
 		return nil, errors.Wrapf(
 			ErrUnknownTarget,
 			"Looking for dependency %s of target %s",
-			dependencyID,
+			dep,
 			dag.ID,
 		)
 	}

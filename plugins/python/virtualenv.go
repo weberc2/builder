@@ -14,37 +14,6 @@ import (
 	"github.com/weberc2/builder/core"
 )
 
-func virtualEnvParseInputs(
-	inputs core.FrozenObject,
-) ([]core.ArtifactID, error) {
-	dependenciesValue, err := inputs.Get("dependencies")
-	if err != nil {
-		return nil, fmt.Errorf(
-			"Missing required argument 'dependencies'",
-		)
-	}
-	dependenciesArray, ok := dependenciesValue.(core.FrozenArray)
-	if !ok {
-		return nil, fmt.Errorf(
-			"'dependencies' argument must be a list",
-		)
-	}
-	dependencies := make([]core.ArtifactID, len(dependenciesArray))
-	for i, dependencyValue := range dependenciesArray {
-		if dependency, ok := dependencyValue.(core.ArtifactID); ok {
-			dependencies[i] = dependency
-			continue
-		}
-		return nil, fmt.Errorf(
-			"'dependencies' elements must be artifact IDs; found %T at "+
-				"index %d",
-			dependencyValue,
-			i,
-		)
-	}
-	return dependencies, nil
-}
-
 func installWheelPaths(
 	path string,
 	wheelPaths []string,
@@ -149,9 +118,17 @@ func virtualEnvBuildScript(
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	dependencies, err := virtualEnvParseInputs(dag.Inputs)
-	if err != nil {
-		return err
+	var dependencies []core.ArtifactID
+	if err := dag.Inputs.VisitKey(
+		"dependencies",
+		core.AssertArrayOf(core.AssertArtifactID(
+			func(dep core.ArtifactID) error {
+				dependencies = append(dependencies, dep)
+				return nil
+			},
+		)),
+	); err != nil {
+		return errors.Wrap(err, "Parsing py_virtualenv inputs")
 	}
 	return virtualEnvPrepare(dag, cache, stdout, stderr, dependencies)
 }

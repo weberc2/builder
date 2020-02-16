@@ -303,6 +303,95 @@ func (err KeyNotFoundErr) Error() string {
 	return fmt.Sprintf("Key not found: %s", string(err))
 }
 
+type KeySpec struct {
+	Key   string
+	Value func(FrozenInput) error
+}
+
+func (fo FrozenObject) VisitKeys(keys ...KeySpec) error {
+	for _, key := range keys {
+		if err := fo.VisitKey(key.Key, key.Value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (fo FrozenObject) VisitKey(
+	key string,
+	f func(FrozenInput) error,
+) error {
+	for _, field := range fo {
+		if field.Key == key {
+			return errors.Wrapf(f(field.Value), "Visiting key '%s'", key)
+		}
+	}
+	return errors.Wrapf(KeyNotFoundErr(key), "Visiting key '%s'", key)
+}
+
+func ParseString(sptr *string) func(FrozenInput) error {
+	return AssertString(func(s string) error {
+		*sptr = s
+		return nil
+	})
+}
+
+func AssertString(f func(string) error) func(FrozenInput) error {
+	return func(fi FrozenInput) error {
+		if s, ok := fi.(String); ok {
+			return f(string(s))
+		}
+		return TypeErr{Wanted: "String", Got: fmt.Sprintf("%T", fi)}
+	}
+}
+
+func AssertInt(f func(int) error) func(FrozenInput) error {
+	return func(fi FrozenInput) error {
+		if i, ok := fi.(Int); ok {
+			return f(int(i))
+		}
+		return TypeErr{Wanted: "Int", Got: fmt.Sprintf("%T", fi)}
+	}
+}
+
+func AssertArtifactID(f func(ArtifactID) error) func(FrozenInput) error {
+	return func(fi FrozenInput) error {
+		if aid, ok := fi.(ArtifactID); ok {
+			return f(aid)
+		}
+		return TypeErr{Wanted: "ArtifactID", Got: fmt.Sprintf("%T", fi)}
+	}
+}
+
+func ParseArtifactID(aidptr *ArtifactID) func(FrozenInput) error {
+	return AssertArtifactID(func(aid ArtifactID) error {
+		*aidptr = aid
+		return nil
+	})
+}
+
+func AssertArray(f func(FrozenArray) error) func(FrozenInput) error {
+	return func(fi FrozenInput) error {
+		if fa, ok := fi.(FrozenArray); ok {
+			return f(fa)
+		}
+		return TypeErr{Wanted: "List", Got: fmt.Sprintf("%T", fi)}
+	}
+}
+
+func AssertArrayOf(
+	f func(FrozenInput) error,
+) func(FrozenInput) error {
+	return AssertArray(func(fa FrozenArray) error {
+		for i, elt := range fa {
+			if err := f(elt); err != nil {
+				return errors.Wrapf(err, "At element %d", i)
+			}
+		}
+		return nil
+	})
+}
+
 func (fo FrozenObject) Get(key string) (FrozenInput, error) {
 	for _, field := range fo {
 		if field.Key == key {
