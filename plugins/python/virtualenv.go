@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,48 +21,24 @@ func installWheelPaths(
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	concurrency := 4
-	env := prependPATH(path)
-	errs := make(chan error, concurrency)
-
-	// Launch `concurrency` workers
-	for i := 0; i < concurrency; i++ {
-		step := len(wheelPaths) / concurrency
-		startIndex := i * step
-		stopIndex := startIndex + step
-		if i == concurrency-1 {
-			stopIndex = len(wheelPaths)
-		}
-		go func(a, b int) {
-			if b > len(wheelPaths) {
-				b = len(wheelPaths)
-			}
-
-			// Run the `pip` in the virtualenv directory (passed in via
-			// `path`). This should be sufficient to run this in the
-			// virtualenv, but we're also updating the PATH environment
-			// variable to include the `path` directory as well.
-			cmd := exec.Command(
-				filepath.Join(path, "pip"),
-				append(
-					[]string{"install", "--no-deps"}, wheelPaths[a:b]...,
-				)...,
-			)
-			cmd.Stdout = stdout
-			cmd.Stderr = stderr
-			cmd.Env = env
-			errs <- cmd.Run()
-		}(startIndex, stopIndex)
-	}
-
-	// Await each worker
-	for i := 0; i < concurrency; i++ {
-		if err := <-errs; err != nil {
-			return err
-		}
-	}
-
-	return nil
+	// Run the `pip` in the virtualenv directory (passed in via `path`). This
+	// should be sufficient to run this in the virtualenv, but we're also
+	// updating the PATH environment variable to include the `path` directory as
+	// well.
+	cmd := exec.Command(
+		filepath.Join(path, "pip"),
+		append(
+			[]string{"install", "--no-deps"}, wheelPaths...,
+		)...,
+	)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Env = prependPATH(os.Environ(), path)
+	return errors.Wrapf(
+		cmd.Run(),
+		"Installing wheels [%s]",
+		strings.Join(wheelPaths, ", "),
+	)
 }
 
 func deduplicate(sources []string) []string {
@@ -133,21 +110,54 @@ func virtualEnvBuildScript(
 	return virtualEnvPrepare(dag, cache, stdout, stderr, dependencies)
 }
 
-func prependPATH(value string) []string {
-	environ := os.Environ() // this is a copy, so no worries about mutating!
-	for i, entry := range environ {
+func prependPATH(environCopy []string, value string) []string {
+	for i, entry := range environCopy {
 		if strings.HasPrefix(entry, "PATH=") {
-			environ[i] = fmt.Sprintf(
+			environCopy[i] = fmt.Sprintf(
 				"PATH=%s:%s",
 				value,
 				entry[len("PATH="):],
 			)
-			return environ
+			return environCopy
 		}
 	}
 	// If we never found the PATH env var in the list of env vars, then
 	// create a new one and append it to the list
-	return append(environ, "PATH="+value)
+	return append(environCopy, "PATH="+value)
+}
+
+type command struct {
+	Command string
+	Args    []string
+	Stdout  io.Writer
+	Stderr  io.Writer
+	Dir     string
+	Env     []string
+}
+
+func prepend(s string, ss ...string) []string {
+	return append([]string{s}, ss...)
+}
+
+// Run the `python` from the virtualenv directory. This should be sufficient to
+// run this in the virtualenv, but we're also updating the PATH environment
+// variable to include the `venvBinDir` as well.
+func venvCmd(
+	cache core.Cache,
+	venv core.ArtifactID,
+	command command,
+) *exec.Cmd {
+	venvBinDir := filepath.Join(cache.Path(venv), "bin")
+	pythonExe := filepath.Join(venvBinDir, "python")
+	cmd := exec.Command(
+		pythonExe,
+		prepend("-m", prepend(command.Command, command.Args...)...)...,
+	)
+	cmd.Stdout = command.Stdout
+	cmd.Stderr = command.Stderr
+	cmd.Dir = command.Dir
+	cmd.Env = prependPATH(command.Env, venvBinDir)
+	return cmd
 }
 
 func replaceInFile(filePath, old, new string) error {
@@ -235,6 +245,7 @@ func virtualEnvPrepare(
 			if err != nil {
 				return "", core.ArtifactID{}, err
 			}
+			log.Printf("DEBUG wheel paths: %s", strings.Join(wheelPaths, ", "))
 			wheelPaths = deduplicate(wheelPaths)
 
 			if err := installWheelPaths(

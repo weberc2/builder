@@ -3,7 +3,6 @@ package python
 import (
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/pkg/errors"
@@ -73,27 +72,17 @@ func testRun(
 				}
 				defer outputFile.Close()
 
-				venvBinDir := filepath.Join(
-					cache.Path(dependencies),
-					"bin",
-				)
-				// Run the `python` from the virtualenv directory. This should
-				// be sufficient to run this in the virtualenv, but we're also
-				// updating the PATH environment variable to include the
-				// `venvBinDir` as well.
-				cmd := exec.Command(
-					filepath.Join(venvBinDir, "python"),
-					"-m",
-					"pytest",
-				)
-				cmd.Stdout = io.MultiWriter(stdout, outputFile)
-				cmd.Stderr = stderr
-				cmd.Dir = filepath.Join(
-					cache.Path(sources),
-					directory,
-				)
-				cmd.Env = prependPATH(venvBinDir)
-				if err := cmd.Run(); err != nil {
+				if err := venvCmd(
+					cache,
+					dependencies,
+					command{
+						Command: "pytest",
+						Dir:     filepath.Join(cache.Path(sources), directory),
+						Stdout:  io.MultiWriter(stdout, outputFile),
+						Stderr:  stderr,
+						Env:     os.Environ(),
+					},
+				).Run(); err != nil {
 					return errors.Wrapf(err, "Running pytest")
 				}
 				return nil

@@ -5,8 +5,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"os/exec"
-	"strings"
 
 	"github.com/pkg/errors"
 	"github.com/weberc2/builder/core"
@@ -17,6 +15,7 @@ type sourceBinary struct {
 	entryPoint   string
 	dependencies []core.ArtifactID
 	sources      core.ArtifactID
+	pexVenv      core.ArtifactID
 }
 
 func (sb *sourceBinary) parseInputs(inputs core.FrozenObject) error {
@@ -42,6 +41,10 @@ func (sb *sourceBinary) parseInputs(inputs core.FrozenObject) error {
 			core.KeySpec{
 				Key:   "sources",
 				Value: core.ParseArtifactID(&sb.sources),
+			},
+			core.KeySpec{
+				Key:   "pex_venv",
+				Value: core.ParseArtifactID(&sb.pexVenv),
 			},
 		),
 		"Parsing py_source_binary inputs",
@@ -92,24 +95,31 @@ DEPENDENCIES:
 		return errors.Wrapf(ErrUnknownTarget, "Target = %s", dependency)
 	}
 
-	args := append(
-		[]string{"--disable-cache", "--python", "python3.6", "--no-index"},
-		append(wheelPaths, wheelPath)...,
-	)
-
-	args = append(
-		args,
-		"-o",
-		cache.Path(dag.ID.ArtifactID()),
-		"-e",
-		fmt.Sprintf("%s:%s", bin.packageName, bin.entryPoint),
-	)
-
-	fmt.Fprintln(stdout, "Running command: pex", strings.Join(args, " "))
-	cmd := exec.Command("pex", args...)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := venvCmd(
+		cache,
+		bin.pexVenv,
+		command{
+			Command: "pex",
+			Args: append(
+				append(
+					[]string{
+						"--disable-cache",
+						"--python",
+						"python3.6",
+						"--no-index",
+					},
+					append(wheelPaths, wheelPath)...,
+				),
+				"-o",
+				cache.Path(dag.ID.ArtifactID()),
+				"-e",
+				fmt.Sprintf("%s:%s", bin.packageName, bin.entryPoint),
+			),
+			Stdout: stdout,
+			Stderr: stderr,
+			Env:    os.Environ(),
+		},
+	).Run(); err != nil {
 		return errors.Wrapf(
 			err,
 			"Building pex for target %s",

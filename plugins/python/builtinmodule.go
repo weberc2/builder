@@ -1,43 +1,6 @@
 package python
 
 const BuiltinModule = `
-def py_source_binary(
-    name,
-    sources,
-    entry_point,
-    package_name = None,
-    dependencies = None,
-):
-    if package_name == None:
-        package_name = name
-    if dependencies == None:
-        dependencies = []
-    return mktarget(
-        name = name,
-        args = {
-            "package_name": package_name,
-            "sources": sources,
-            "entry_point": entry_point,
-            "dependencies": dependencies,
-        },
-        type = "py_source_binary",
-    )
-
-def py_source_library(name, sources, package_name = None, dependencies = None):
-    if dependencies == None:
-        dependencies = []
-    if package_name == None:
-        package_name = name
-    return mktarget(
-        name = name,
-        args = {
-            "package_name": package_name,
-            "sources": sources,
-            "dependencies": dependencies,
-        },
-        type = "py_source_library",
-    )
-
 def pypi(
     name,
     package_name = None,
@@ -65,6 +28,49 @@ def virtualenv(name, dependencies):
         name = name,
         args = {"dependencies": dependencies},
         type = "virtualenv",
+    )
+
+_pex = virtualenv(
+    name="__pex__",
+    dependencies = [ pypi(name = "pex") ],
+)
+
+def py_source_binary(
+    name,
+    sources,
+    entry_point,
+    package_name = None,
+    dependencies = None,
+):
+    if package_name == None:
+        package_name = name
+    if dependencies == None:
+        dependencies = []
+    return mktarget(
+        name = name,
+        args = {
+            "package_name": package_name,
+            "sources": sources,
+            "entry_point": entry_point,
+            "dependencies": dependencies,
+            "pex_venv": _pex,
+        },
+        type = "py_source_binary",
+    )
+
+def py_source_library(name, sources, package_name = None, dependencies = None):
+    if dependencies == None:
+        dependencies = []
+    if package_name == None:
+        package_name = name
+    return mktarget(
+        name = name,
+        args = {
+            "package_name": package_name,
+            "sources": sources,
+            "dependencies": dependencies,
+        },
+        type = "py_source_library",
     )
 
 atomicwrites = pypi(name = "atomicwrites")

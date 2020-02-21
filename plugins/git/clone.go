@@ -15,14 +15,12 @@ func gitCloneBuildScript(
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	repo, err := dag.Inputs.GetString("repo")
-	if err != nil {
-		return err
-	}
-
-	sha, err := dag.Inputs.GetString("sha")
-	if err != nil {
-		return err
+	var repo, sha string
+	if err := dag.Inputs.VisitKeys(
+		core.KeySpec{Key: "repo", Value: core.ParseString(&repo)},
+		core.KeySpec{Key: "sha", Value: core.ParseString(&sha)},
+	); err != nil {
+		return errors.Wrap(err, "Parsing git_clone inputs")
 	}
 
 	if _, err := cache.TempDir(

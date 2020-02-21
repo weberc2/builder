@@ -392,6 +392,7 @@ func AssertArrayOf(
 	})
 }
 
+// Deprecated in favor of VisitKey()
 func (fo FrozenObject) Get(key string) (FrozenInput, error) {
 	for _, field := range fo {
 		if field.Key == key {
@@ -401,6 +402,7 @@ func (fo FrozenObject) Get(key string) (FrozenInput, error) {
 	return nil, KeyNotFoundErr(key)
 }
 
+// Deprecated in favor of VisitKey(..., ParseString())
 func (fo FrozenObject) GetString(key string) (String, error) {
 	v, err := fo.Get(key)
 	if err != nil {
@@ -413,35 +415,6 @@ func (fo FrozenObject) GetString(key string) (String, error) {
 }
 
 type FrozenArray []FrozenInput
-
-func (fa FrozenArray) ForEach(f func(i int, elt FrozenInput) error) error {
-	for i, elt := range fa {
-		if err := f(i, elt); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (fa FrozenArray) StringSlice() ([]string, error) {
-	output := make([]string, len(fa))
-	for i, v := range fa {
-		if s, ok := v.(String); ok {
-			output[i] = string(s)
-			continue
-		}
-		return nil, errors.Wrapf(NewTypeErr("String", v), "Index %d", i)
-	}
-	return output, nil
-}
-
-func (fa FrozenArray) GetString(i int) (String, error) {
-	if s, ok := fa[i].(String); ok {
-		return s, nil
-	}
-	return "", NewTypeErr("String", fa[i])
-}
 
 type ArtifactID FrozenTargetID
 
