@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,7 +244,6 @@ func virtualEnvPrepare(
 			if err != nil {
 				return "", core.ArtifactID{}, err
 			}
-			log.Printf("DEBUG wheel paths: %s", strings.Join(wheelPaths, ", "))
 			wheelPaths = deduplicate(wheelPaths)
 
 			if err := installWheelPaths(
