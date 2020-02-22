@@ -31,7 +31,7 @@ def virtualenv(name, dependencies):
     )
 
 _pex = virtualenv(
-    name="__pex__",
+    name="__pex_venv__",
     dependencies = [ pypi(name = "pex") ],
 )
 
@@ -90,7 +90,8 @@ wcwidth = pypi(name = "wcwidth")
 # pytest (which implies that every invoking package would have to *build* its
 # own copy of pytest).
 _pytest = pypi(
-	name = "pytest",
+    name = "__pytest__",
+    package_name = "pytest",
 	dependencies = [
 		atomicwrites,
 		attrs,
