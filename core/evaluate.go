@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	sl "github.com/weberc2/builder/slutil"
 	"go.starlark.net/starlark"
 )
 
@@ -169,60 +170,41 @@ func mktarget(
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	if len(args) > 0 {
-		return nil, fmt.Errorf("target() only takes keyword args")
-	}
-
-	var t Target
-	t.ID.Package = PackageName(th.Name)
-
-	nameValue, err := findKwarg(kwargs, "name")
-	if err != nil {
-		return nil, err
-	}
-	if name, ok := nameValue.(starlark.String); ok {
-		if strings.Contains(string(name), "/") {
-			return nil, fmt.Errorf("ValueError: Invalid value for 'name'")
-		}
-		t.ID.Target = TargetName(name)
-	} else {
-		return nil, fmt.Errorf(
-			"TypeError: 'name' must be str, got %T",
-			nameValue,
-		)
-	}
-
-	typeValue, err := findKwarg(kwargs, "type")
-	if err != nil {
-		return nil, err
-	}
-	if typ, ok := typeValue.(starlark.String); ok {
-		t.BuilderType = BuilderType(typ)
-	} else {
-		return nil, fmt.Errorf(
-			"TypeError: 'type' must be str, got %T",
-			typeValue,
-		)
-	}
-
-	argsValue, err := findKwarg(kwargs, "args")
-	if err != nil {
-		return nil, err
-	}
-	if args, ok := argsValue.(*starlark.Dict); ok {
-		inputs, err := starlarkDictToObject(t.ID, args)
-		if err != nil {
-			return nil, err
-		}
-		t.Inputs = inputs
-	} else {
-		return nil, fmt.Errorf(
-			"TypeError: 'args' must be a dict, got %T",
-			argsValue,
-		)
-	}
-
-	return t, nil
+	t := Target{ID: TargetID{Package: PackageName(th.Name)}}
+	return t, sl.ParseArgs(
+		"mktarget",
+		sl.Args{Pos: args, Kw: kwargs},
+		sl.ArgsSpec{
+			PosSpecs: []sl.PosSpec{{
+				Keyword: "name",
+				Value: sl.AssertString(func(s string) error {
+					if strings.Contains(s, "/") {
+						return errors.New(
+							"ValueError: Invalid value for 'name'",
+						)
+					}
+					t.ID.Target = TargetName(s)
+					return nil
+				}),
+			}, {
+				Keyword: "type",
+				Value: sl.AssertString(func(s string) error {
+					t.BuilderType = BuilderType(s)
+					return nil
+				}),
+			}, {
+				Keyword: "args",
+				Value: sl.AssertDict(func(d *starlark.Dict) error {
+					inputs, err := starlarkDictToObject(t.ID, d)
+					if err != nil {
+						return errors.Wrap(err, "Parsing target args")
+					}
+					t.Inputs = inputs
+					return nil
+				}),
+			}},
+		},
+	)
 }
 
 func starlarkValueToInput(tid TargetID, value starlark.Value) (Input, error) {

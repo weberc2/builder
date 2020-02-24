@@ -392,6 +392,28 @@ func AssertArrayOf(
 	})
 }
 
+func AssertObject(f func(FrozenObject) error) func(FrozenInput) error {
+	return func(fi FrozenInput) error {
+		if fo, ok := fi.(FrozenObject); ok {
+			return f(fo)
+		}
+		return TypeErr{Wanted: "Dict", Got: fmt.Sprintf("%T", fi)}
+	}
+}
+
+func AssertObjectOf(
+	f func(FrozenField) error,
+) func(FrozenInput) error {
+	return AssertObject(func(fo FrozenObject) error {
+		for _, field := range fo {
+			if err := f(field); err != nil {
+				return errors.Wrapf(err, "At field %s", field.Key)
+			}
+		}
+		return nil
+	})
+}
+
 // Deprecated in favor of VisitKey()
 func (fo FrozenObject) Get(key string) (FrozenInput, error) {
 	for _, field := range fo {
