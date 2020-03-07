@@ -1,81 +1,101 @@
 package python
 
 const BuiltinModule = `
-def pypi(
-    name,
-    package_name = None,
-    constraint = None,
-    dependencies = None,
-):
-    if package_name == None:
-        package_name = name
-    if constraint == None:
-        constraint = ""
-    if dependencies == None:
-        dependencies = []
-    return mktarget(
+load("std/command", "bash")
+
+def pypi(name, pypi_name = None, constraint = None, dependencies = None):
+    dependencies = dependencies if dependencies != None else []
+    return bash(
         name = name,
-        args = {
-            "package_name": package_name,
-            "constraint": constraint,
-            "dependencies": dependencies,
+        environment = {
+            "DEPENDENCY_{}".format(i): dependency
+            for i, dependency in enumerate(dependencies)
         },
-        type = "pypi",
+        script = "\n".join(
+            [
+                "python -m pip wheel --no-deps -w $OUTPUT {}{}".format(
+                    pypi_name if pypi_name != None else name,
+                    constraint if constraint != None else "",
+                ),
+                'touch "$OUTPUT/DEPENDENCIES"',
+            ] + [
+                'echo "$DEPENDENCY_{}" >> "$OUTPUT/DEPENDENCIES"'.format(i)
+                for i, _ in enumerate(dependencies)
+            ],
+        ),
     )
 
-def virtualenv(name, dependencies):
+def venv(name, dependencies = None):
     return mktarget(
         name = name,
-        args = {"dependencies": dependencies},
         type = "virtualenv",
+        args = {
+            "dependencies": dependencies if dependencies != None else [],
+        },
     )
 
-_pex = virtualenv(
-    name="__pex_venv__",
-    dependencies = [ pypi(name = "pex") ],
+_pex = bash(
+    name = "__pex__",
+    script = """
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install pex
+python -m pex --disable-cache --python python3.6 pex -o $OUTPUT -c pex
+    """,
 )
 
-def py_source_binary(
+def pex(
     name,
-    sources,
     entry_point,
-    package_name = None,
+    bin_package,
+    bin_package_name = None,
     dependencies = None,
 ):
-    if package_name == None:
-        package_name = name
-    if dependencies == None:
-        dependencies = []
-    return mktarget(
-        name = name,
-        args = {
-            "package_name": package_name,
-            "sources": sources,
-            "entry_point": entry_point,
-            "dependencies": dependencies,
-            "pex_venv": _pex,
-        },
-        type = "py_source_binary",
-    )
+    dependencies = {
+        "DEPENDENCY_{}".format(i): dependency
+        for i, dependency in enumerate(dependencies)
+    } if dependencies != None else {}
 
-def py_source_library(name, sources, package_name = None, dependencies = None):
-    if dependencies == None:
-        dependencies = []
-    if package_name == None:
-        package_name = name
-    return mktarget(
+    bin_package_name = bin_package_name if bin_package_name != None else name
+    environment = dict(dependencies)
+    environment["PEX"] = _pex
+    environment["BIN"] = bin_package
+    return bash(
         name = name,
-        args = {
-            "package_name": package_name,
-            "sources": sources,
-            "dependencies": dependencies,
-        },
-        type = "py_source_library",
+        environment = environment,
+        script = """
+function fetchDeps() {{
+    for dep in $@; do
+        echo $dep
+        fetchDeps $(cat $dep/DEPENDENCIES)
+    done
+}}
+
+# Get full dependency list (including transitive deps) and put into the local
+# env var $deps
+deps=$(fetchDeps {} $BIN | sort | uniq)
+
+# Get the wheel for each dep
+wheels=$(for dep in $deps; do echo $dep/$(ls $dep | grep '.whl'); done)
+
+# Build a pex file from the wheels, storing it in $OUTPUT and setting the
+# package/entrypoint appropriately
+$PEX --disable-cache --python python3.6 --no-index $wheels -o $OUTPUT -e {}:{}
+""".format(
+            " ".join(["${}".format(k) for k in dependencies.keys()]),
+            bin_package_name,
+            entry_point,
+        ),
     )
 
 atomicwrites = pypi(name = "atomicwrites")
 attrs = pypi(name = "attrs")
-packaging = pypi(name = "packaging")
+pyparsing = pypi(name = "pyparsing", constraint = "==2.4.5")
+packaging = pypi(
+    name = "packaging",
+    constraint = "==19.2",
+    dependencies = [pyparsing],
+)
 six = pypi(name = "six")
 more_itertools = pypi(name = "more-itertools", dependencies = [ six ])
 zipp = pypi(name = "zipp", dependencies = [ more_itertools ])
@@ -84,14 +104,10 @@ pluggy = pypi(name = "pluggy", dependencies = [ importlib_metadata ])
 py = pypi(name = "py")
 wcwidth = pypi(name = "wcwidth")
 
-# It's important that this is defined outside of pytest() so that it is a
-# member of this package and not the package that invokes pytest(). The latter
-# case would mean that every invoking package would have its own copy of
-# pytest (which implies that every invoking package would have to *build* its
-# own copy of pytest).
-_pytest = pypi(
-    name = "__pytest__",
-    package_name = "pytest",
+_pytest_wheel = pypi(
+    name = "__pytest_wheel__",
+    pypi_name = "pytest",
+    constraint = "==5.2.0",
 	dependencies = [
 		atomicwrites,
 		attrs,
@@ -103,21 +119,60 @@ _pytest = pypi(
 )
 
 def pytest(name, sources, directory = None, dependencies = None):
-	if directory == None:
-		directory = ""
-	if dependencies == None:
-		dependencies = []
-	dependencies.append(_pytest)
-	return mktarget(
-		name = name,
-		args = {
-			"sources": sources,
-			"directory": directory,
-			"dependencies": virtualenv(
-				name = "{}_dependencies".format(name),
-				dependencies = dependencies,
-			),
-		},
-		type = "pytest",
-	)
+    return bash(
+        name = name,
+        environment = {
+            "SOURCES": sources,
+            "PYTEST": pex(
+                name = "{}_dependencies".format(name),
+                bin_package = _pytest_wheel,
+                bin_package_name = "pytest",
+                entry_point = "main",
+                dependencies = dependencies,
+            ),
+        },
+        script = "$PYTEST $SOURCES{} > $OUTPUT".format(
+            "/"+directory if directory != None else "",
+        ),
+    )
+
+def py_source_binary(
+    name,
+    sources,
+    entry_point,
+    package_name = None,
+    dependencies = None,
+):
+    return pex(
+        name = name,
+        bin_package = py_source_library(
+            name = "{}_sources".format(name),
+            package_name = package_name,
+            sources = sources,
+            dependencies = dependencies,
+        ),
+        bin_package_name = package_name,
+        entry_point = entry_point,
+    )
+
+def py_source_library(name, sources, package_name = None, dependencies = None):
+    dependencies = dependencies if dependencies != None else []
+    environment = {
+        "DEPENDENCY_{}".format(i): dependency
+        for i, dependency in enumerate(dependencies)
+    }
+    environment["SOURCES"] = sources
+    return bash(
+        name = name,
+        environment = environment,
+        script = "\n".join(
+            [
+                "python -m pip wheel --no-cache-dir -w $OUTPUT $SOURCES",
+                'touch "$OUTPUT/DEPENDENCIES"',
+            ] + [
+                'echo "$DEPENDENCY_{}" >> "$OUTPUT/DEPENDENCIES"'.format(i)
+                for i, _ in enumerate(dependencies)
+            ],
+        ),
+    )
 `

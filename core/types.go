@@ -336,6 +336,22 @@ func ParseString(sptr *string) func(FrozenInput) error {
 	})
 }
 
+func Match(f func(FrozenInput) error, tail ...func(FrozenInput) error) func(FrozenInput) error {
+	return func(fi FrozenInput) error {
+		var msg string
+		if err := f(fi); err != nil {
+			msg = fmt.Sprintf("'%s'", err.Error())
+			for _, f := range tail {
+				if err := f(fi); err != nil {
+					msg = fmt.Sprintf("%s, '%s'", msg, err)
+				}
+			}
+			return errors.Errorf("Failed to match any: %s", msg)
+		}
+		return nil
+	}
+}
+
 func AssertString(f func(string) error) func(FrozenInput) error {
 	return func(fi FrozenInput) error {
 		if s, ok := fi.(String); ok {

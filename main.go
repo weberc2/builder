@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/pkg/errors"
 	"github.com/weberc2/builder/core"
+	"github.com/weberc2/builder/plugins/command"
 	"github.com/weberc2/builder/plugins/git"
 	"github.com/weberc2/builder/plugins/golang"
 	"github.com/weberc2/builder/plugins/python"
@@ -37,11 +39,7 @@ var plugins = []core.Plugin{
 	git.Clone,
 	golang.Library,
 	golang.Binary,
-	python.SourceBinary,
-	python.SourceLibrary,
-	python.PypiLibrary,
-	python.Test,
-	python.VirtualEnv,
+	command.Command,
 
 	// Create a noop plugin. This is useful for meta-packages.
 	core.Plugin{
@@ -112,11 +110,15 @@ func main() {
 	var t *core.Target
 	targets, err := core.Evaluator{
 		BuiltinModules: map[string]string{
-			"std/python": python.BuiltinModule,
+			"std/python":  python.BuiltinModule,
+			"std/command": command.BuiltinModule,
 		},
 		PackageRoot: root,
 	}.Evaluate(targetID.Package)
 	if err != nil {
+		if evalErr, ok := errors.Cause(err).(*starlark.EvalError); ok {
+			log.Println(evalErr.Backtrace())
+		}
 		log.Fatalf("Evaluation error: %v", err)
 	}
 	for i, target := range targets {

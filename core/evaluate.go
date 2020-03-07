@@ -171,7 +171,7 @@ func mktarget(
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
 	t := Target{ID: TargetID{Package: PackageName(th.Name)}}
-	return t, sl.ParseArgs(
+	err := sl.ParseArgs(
 		"mktarget",
 		sl.Args{Pos: args, Kw: kwargs},
 		sl.ArgsSpec{
@@ -205,6 +205,7 @@ func mktarget(
 			}},
 		},
 	)
+	return t, err
 }
 
 func starlarkValueToInput(tid TargetID, value starlark.Value) (Input, error) {

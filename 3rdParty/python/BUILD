@@ -173,10 +173,10 @@ mandrill = pypi(name = "mandrill", dependencies = [requests, docopt])
 alooma = pypi(name = "alooma", dependencies = [urllib3, requests])
 auth0 = pypi(
     name = "auth0",
-    package_name = "auth0-python",
+    pypi_name = "auth0-python",
     dependencies = [requests],
 )
-jwt = pypi(name = "jwt", package_name = "PyJWT")
+jwt = pypi(name = "jwt", pypi_name = "PyJWT")
 freezegun = pypi(name = "freezegun", dependencies = [six, python_dateutil])
 appdirs = pypi(name = "appdirs")
 click = pypi(
