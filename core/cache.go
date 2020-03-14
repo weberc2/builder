@@ -129,11 +129,12 @@ func (c Cache) TempDir(
 	return aid, err
 }
 
-func LocalCache(directory string) Cache {
+func LocalCache(workspaceID, directory string) Cache {
 	return func(id ArtifactID) string {
 		if id.Target == "" {
 			return filepath.Join(
 				directory,
+				workspaceID,
 				"packages",
 				string(id.Package),
 				"filegroups",
@@ -145,6 +146,7 @@ func LocalCache(directory string) Cache {
 		}
 		return filepath.Join(
 			directory,
+			workspaceID,
 			"packages",
 			string(id.Package),
 			"targets",

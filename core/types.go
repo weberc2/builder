@@ -20,7 +20,7 @@ type TargetID struct {
 }
 
 func (tid TargetID) String() string {
-	return fmt.Sprintf("%s/%s", tid.Package, tid.Target)
+	return fmt.Sprintf("%s:%s", tid.Package, tid.Target)
 }
 
 type InvalidTargetIDErr string

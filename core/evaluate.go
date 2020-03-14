@@ -10,16 +10,6 @@ import (
 	"go.starlark.net/starlark"
 )
 
-// Evaluator evaluates the macro language into distinct target definitions.
-type Evaluator struct {
-	// PackageRoot is the directory that contains all packages.
-	PackageRoot string
-
-	// BuiltinModules is a list of modules that are baked into the application
-	// process.
-	BuiltinModules map[string]string
-}
-
 type entry struct {
 	globals starlark.StringDict
 	err     error
@@ -134,11 +124,15 @@ func load(
 	return globals, nil
 }
 
-func (ev Evaluator) Evaluate(p PackageName) ([]Target, error) {
+func Evaluate(
+	p PackageName,
+	packageRoot string,
+	builtinModules map[string]string,
+) ([]Target, error) {
 	globals, err := loadPackage(
 		map[string]*entry{},
-		ev.BuiltinModules,
-		ev.PackageRoot,
+		builtinModules,
+		packageRoot,
 		string(p),
 	)
 	if err != nil {

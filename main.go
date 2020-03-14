@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/urfave/cli"
 	"github.com/weberc2/builder/core"
 	"github.com/weberc2/builder/plugins/command"
 	"github.com/weberc2/builder/plugins/git"
@@ -19,18 +20,32 @@ import (
 	"go.starlark.net/starlark"
 )
 
-func findRoot(start string) (string, error) {
+type workspace struct {
+	root string
+	id   string
+}
+
+func findRoot(start string) (workspace, error) {
 	entries, err := ioutil.ReadDir(start)
 	if err != nil {
-		return "", err
+		return workspace{}, err
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() && entry.Name() == "WORKSPACE" {
-			return start, nil
+			data, err := ioutil.ReadFile(filepath.Join(start, entry.Name()))
+			if err != nil {
+				return workspace{}, err
+			}
+			if id := strings.TrimSpace(string(data)); len(id) > 0 {
+				return workspace{root: start, id: id}, nil
+			}
+			return workspace{}, errors.New(
+				"WORKSPACE must contain workspace ID",
+			)
 		}
 	}
 	if start == "/" {
-		return "", fmt.Errorf("WORKSPACE not found")
+		return workspace{}, fmt.Errorf("WORKSPACE not found")
 	}
 	return findRoot(filepath.Dir(start))
 }
@@ -61,113 +76,202 @@ var plugins = []core.Plugin{
 	},
 }
 
-func build(cache core.Cache, dag core.DAG) error {
+func build(ctx *cli.Context, cache core.Cache, dag core.DAG) error {
 	return core.Build(core.LocalExecutor(plugins, cache), dag)
 }
 
-func run(cache core.Cache, dag core.DAG) error {
-	if err := build(cache, dag); err != nil {
+func run(ctx *cli.Context, cache core.Cache, dag core.DAG) error {
+	if err := build(ctx, cache, dag); err != nil {
 		return err
 	}
 
-	cmd := exec.Command(cache.Path(dag.ID.ArtifactID()), os.Args[3:]...)
+	cmd := exec.Command(cache.Path(dag.ID.ArtifactID()), ctx.Args()[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
 
-func graph(dag core.DAG) {
-	for _, dependency := range dag.Dependencies {
-		graph(dependency)
-	}
-
-	fmt.Printf("%s:\n", dag.ID)
-	for _, dependency := range dag.Dependencies {
-		fmt.Printf("  %s\n", dependency.ID)
+func graph(dag core.DAG, indent string) {
+	fmt.Printf("%s%s", indent, dag.ID)
+	if len(dag.Dependencies) > 0 {
+		fmt.Println(" {")
+		for _, dependency := range dag.Dependencies {
+			graph(dependency, indent+"  ")
+			fmt.Println(",")
+		}
+		fmt.Print(indent + "}")
 	}
 }
 
-func main() {
-	if len(os.Args) < 3 {
-		log.Fatal("USAGE: builder <command> <target>")
-	}
-
-	pwd, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-	root, err := findRoot(pwd)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	targetID, err := core.ParseTargetID(root, pwd, os.Args[2])
-	if err != nil {
-		log.Fatalf("Failed to parse target ID: %v", err)
-	}
-
-	var t *core.Target
-	targets, err := core.Evaluator{
-		BuiltinModules: map[string]string{
-			"std/python":  python.BuiltinModule,
-			"std/command": command.BuiltinModule,
-		},
-		PackageRoot: root,
-	}.Evaluate(targetID.Package)
-	if err != nil {
-		if evalErr, ok := errors.Cause(err).(*starlark.EvalError); ok {
-			log.Println(evalErr.Backtrace())
+func targetAction(
+	f func(ctx *cli.Context, t *core.Target, workspace workspace) error,
+) cli.ActionFunc {
+	return func(ctx *cli.Context) error {
+		if len(ctx.Args()) < 1 {
+			return errors.New("Missing PACKAGE:TARGET argument")
 		}
-		log.Fatalf("Evaluation error: %v", err)
-	}
-	for i, target := range targets {
-		if target.ID == targetID {
-			t = &targets[i]
-		}
-	}
-	if t == nil {
-		log.Fatalf("Couldn't find target %s", targetID)
-	}
 
-	var command func(core.Cache, core.DAG) error
-	switch os.Args[1] {
-	case "show", "eval":
-		data, err := json.MarshalIndent(t, "", "    ")
+		pwd, err := os.Getwd()
 		if err != nil {
-			log.Fatalf("Failed to marshal target %s: %v", targetID, err)
+			return err
 		}
-		fmt.Printf("%s\n", data)
-		os.Exit(0)
-	case "cache-path", "path":
-		command = func(cache core.Cache, dag core.DAG) error {
-			fmt.Println(cache.Path(dag.ID.ArtifactID()))
-			return nil
+		workspace, err := findRoot(pwd)
+		if err != nil {
+			return err
 		}
-	case "build":
-		command = build
-	case "run":
-		command = run
-	case "graph":
-		command = func(_ core.Cache, dag core.DAG) error {
-			graph(dag)
-			return nil
+
+		targetID, err := core.ParseTargetID(workspace.root, pwd, ctx.Args()[0])
+		if err != nil {
+			return errors.Errorf("Failed to parse target ID: %v", err)
 		}
-	default:
-		log.Fatalf("Invalid command: %s", os.Args[1])
+
+		targets, err := core.Evaluate(
+			targetID.Package,
+			workspace.root,
+			map[string]string{
+				"std/python":  python.BuiltinModule,
+				"std/command": command.BuiltinModule,
+			},
+		)
+
+		if err != nil {
+			if evalErr, ok := errors.Cause(err).(*starlark.EvalError); ok {
+				return errors.New(evalErr.Backtrace())
+			}
+			return errors.Errorf("Evaluation error: %v", err)
+		}
+
+		for i, target := range targets {
+			if target.ID == targetID {
+				return f(ctx, &targets[i], workspace)
+			}
+		}
+		return errors.Errorf("Couldn't find target %s", targetID)
 	}
+}
 
-	cache := core.LocalCache("/tmp/cache")
-
-	dag, err := core.FreezeTarget(root, cache, *t)
-	if err != nil {
-		if evalErr, ok := err.(*starlark.EvalError); ok {
-			log.Fatal(evalErr.Backtrace())
+func dagAction(
+	f func(ctx *cli.Context, cache core.Cache, dag core.DAG) error,
+) cli.ActionFunc {
+	return targetAction(func(
+		ctx *cli.Context,
+		t *core.Target,
+		workspace workspace,
+	) error {
+		cacheDir := "/tmp/cache"
+		if home := os.Getenv("HOME"); home != "" {
+			cacheDir = filepath.Join(home, ".cache/builder")
 		}
-		log.Fatal(err)
-	}
+		cache := core.LocalCache(workspace.id, cacheDir)
 
-	if err := command(cache, dag); err != nil {
-		log.Fatal(err)
+		dag, err := core.FreezeTarget(workspace.root, cache, *t)
+		if err != nil {
+			if evalErr, ok := err.(*starlark.EvalError); ok {
+				return errors.New(evalErr.Backtrace())
+			}
+			return err
+		}
+		return f(ctx, cache, dag)
+	})
+}
+
+func main() {
+	app := cli.NewApp()
+	app.Commands = []cli.Command{
+		cli.Command{
+			Name:        "build",
+			Usage:       "Build a target",
+			UsageText:   "Build a target",
+			Description: "Build a target",
+			ArgsUsage: "Takes a single argument in the format " +
+				"'PACKAGE:TARGET'",
+			Action: dagAction(build),
+		},
+		cli.Command{
+			Name:      "show",
+			Aliases:   []string{"eval", "json"},
+			Usage:     "Print JSON representation for a given target",
+			UsageText: "Print JSON representation for a given target",
+			Description: "Takes a target identifier (PACKAGE:TARGET), finds " +
+				"the corresponding target definition (starlark), evaluates " +
+				"it into a target, and renders the target as JSON.",
+			ArgsUsage: "Takes a single argument in the format " +
+				"'PACKAGE:TARGET'",
+			Action: targetAction(func(
+				ctx *cli.Context,
+				t *core.Target,
+				workspace workspace,
+			) error {
+				data, err := json.MarshalIndent(t, "", "    ")
+				if err != nil {
+					return errors.Wrapf(
+						err,
+						"Failed to marshal target %s",
+						t.ID,
+					)
+				}
+				fmt.Printf("%s\n", data)
+				return nil
+			}),
+		},
+		cli.Command{
+			Name:    "cache-path",
+			Aliases: []string{"path"},
+			Usage:   "Print the cache path for a target at the current version",
+			UsageText: "Print the cache path for a target at the current " +
+				"version",
+			Description: "For a target ID (PACKAGE:TARGET), this command " +
+				"evaluates and fully hashes the target to determine where " +
+				"the final cache path for the artifact. This does not build " +
+				"the artifact nor does it depend on the artifact having " +
+				"been built previously at the current version.",
+			ArgsUsage: "Takes a single argument in the format " +
+				"'PACKAGE:TARGET'",
+			Action: dagAction(func(
+				ctx *cli.Context,
+				cache core.Cache,
+				dag core.DAG,
+			) error {
+				_, err := fmt.Println(cache.Path(dag.ID.ArtifactID()))
+				return err
+			}),
+		},
+		cli.Command{
+			Name:      "run",
+			Usage:     "Tries to execute a build artifact",
+			UsageText: "Tries to execute a build artifact",
+			Description: fmt.Sprintf(
+				"Builds the target artifact and attempts to execute it (via "+
+					"subprocess). This is conceptually the same as `%s build "+
+					"PACKAGE:TARGET && $(%s path PACKAGE:TARGET)`.",
+				os.Args[0],
+				os.Args[0],
+			),
+			ArgsUsage: "Takes a single argument in the format " +
+				"'PACKAGE:TARGET'",
+			Action: dagAction(run),
+		},
+		cli.Command{
+			Name:        "graph",
+			Usage:       "Graphs the dependencies",
+			UsageText:   "Graphs the dependencies",
+			Description: "Render the dependency graph as plaintext",
+			ArgsUsage: "Takes a single argument in the format " +
+				"'PACKAGE:TARGET'",
+			Action: dagAction(func(
+				_ *cli.Context,
+				_ core.Cache,
+				dag core.DAG,
+			) error {
+				graph(dag, "")
+				fmt.Println()
+				return nil
+			}),
+		},
+	}
+	if err := app.Run(os.Args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }

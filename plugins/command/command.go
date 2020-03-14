@@ -100,7 +100,7 @@ def bash(name, script, environment = None):
         args = {
             "command": "bash",
             "environment": environment if environment != None else {},
-            "args": [ "-c", "set -e\n{}".format(script) ],
+            "args": [ "-c", "set -e\nset -o pipefail\n{}".format(script) ],
         },
     )
 `

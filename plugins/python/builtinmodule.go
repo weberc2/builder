@@ -131,7 +131,7 @@ def pytest(name, sources, directory = None, dependencies = None):
                 dependencies = dependencies,
             ),
         },
-        script = "$PYTEST $SOURCES{} > $OUTPUT".format(
+        script = '$PYTEST $SOURCES{} | tee $OUTPUT'.format(
             "/"+directory if directory != None else "",
         ),
     )
