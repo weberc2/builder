@@ -52,8 +52,6 @@ func findRoot(start string) (workspace, error) {
 
 var plugins = []core.Plugin{
 	git.Clone,
-	golang.Library,
-	golang.Binary,
 	command.Command,
 
 	// Create a noop plugin. This is useful for meta-packages.
@@ -132,6 +130,8 @@ func targetAction(
 			map[string]string{
 				"std/python":  python.BuiltinModule,
 				"std/command": command.BuiltinModule,
+				"std/golang":  golang.BuiltinModule,
+				"std/git":     git.BuiltinModule,
 			},
 		)
 
@@ -213,6 +213,22 @@ func main() {
 				}
 				fmt.Printf("%s\n", data)
 				return nil
+			}),
+		},
+		cli.Command{
+			Name:      "checksum",
+			Aliases:   []string{"fingerprint"},
+			Usage:     "Print the checksum of a target",
+			UsageText: "Print the checksum for a target",
+			ArgsUsage: "Takes a single argument in the format " +
+				"'PACKAGE:TARGET'",
+			Action: dagAction(func(
+				ctx *cli.Context,
+				cache core.Cache,
+				dag core.DAG,
+			) error {
+				_, err := fmt.Println(dag.ID.Checksum)
+				return err
 			}),
 		},
 		cli.Command{

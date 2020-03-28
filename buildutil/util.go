@@ -53,7 +53,10 @@ func Build(
 	data := make([]byte, 16)
 	rand.Seed(time.Now().UnixNano())
 	rand.Read(data)
-	output := base64.RawURLEncoding.EncodeToString(data)
+	output := filepath.Join(
+		workspace,
+		base64.RawURLEncoding.EncodeToString(data),
+	)
 
 	if err := script(&BuildContext{
 		DAG:       dag,
@@ -74,7 +77,7 @@ func Build(
 	}
 
 	if err := os.Rename(
-		filepath.Join(workspace, output),
+		filepath.Join(output),
 		cache.Path(dag.ID.ArtifactID()),
 	); err != nil {
 		if os.IsNotExist(err) {

@@ -53,6 +53,11 @@ func (f *freezer) freezeFileGroup(fg FileGroup) (ArtifactID, error) {
 			for _, match := range matches {
 				data, err := ioutil.ReadFile(match)
 				if err != nil {
+					if pathErr, ok := err.(*os.PathError); ok {
+						if pathErr.Err.Error() == "is a directory" {
+							continue
+						}
+					}
 					return "", ArtifactID{}, err
 				}
 				relpath, err := filepath.Rel(
